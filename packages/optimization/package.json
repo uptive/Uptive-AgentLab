@@ -8,12 +8,19 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@agentlab/contracts": "workspace:*"
+    "@agentlab/contracts": "workspace:*",
+    "@anthropic-ai/sdk": "^0.128.0"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./anthropic": "./src/clients/anthropic.ts"
   }
 }
