@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentDefinition, AgentRuntime, FlowDefinition, TraceEvent } from "@agentlab/contracts";
-import { codeReviewFlow, createFlowEngine, dummyAgentRegistry, FlowValidationError } from "../src/index.js";
+import { createFlowEngine, dummyAgentRegistry, FlowValidationError } from "../src/index.js";
+import { codeReviewFlow } from "./fixtures/codeReviewFlow.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

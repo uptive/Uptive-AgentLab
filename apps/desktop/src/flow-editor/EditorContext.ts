@@ -1,29 +1,35 @@
 import { createContext, useContext } from "react";
-import type { AgentDefinition, StepRun, StepStatus } from "@agentlab/contracts";
+import type { AgentDefinition } from "@agentlab/contracts";
 import { colors } from "../theme.js";
+import type { DemoFrame } from "./useDemoRun.js";
 
 export interface EditorContextValue {
   agentsById: Map<string, AgentDefinition>;
-  /** Latest step state per node id for the current/last run. */
-  steps: Record<string, StepRun>;
   /** Number of upstream dependencies per node id. */
   incoming: Record<string, number>;
   /** Node ids that have validation errors. */
   invalidNodeIds: Set<string>;
+  /** Current frame of the demo-run animation, if one is active. */
+  demo?: DemoFrame;
 }
 
 export const EditorContext = createContext<EditorContextValue>({
   agentsById: new Map(),
-  steps: {},
   incoming: {},
   invalidNodeIds: new Set(),
 });
 
 export const useEditorContext = () => useContext(EditorContext);
 
-export const STATUS_COLORS: Record<StepStatus, string> = {
-  pending: "#8a8a8a",
-  running: "#f5c451",
-  completed: colors.accent,
-  failed: "#ff6b6b",
-};
+export const DANGER = "#ff6b6b";
+export const WARNING = "#f5c451";
+
+export const DEMO_COLORS = {
+  idle: "#6a6a6a",
+  waiting: WARNING,
+  running: WARNING,
+  done: colors.accent,
+} as const;
+
+// Kept for places that just need an error colour.
+export const STATUS_COLORS = { failed: DANGER } as const;

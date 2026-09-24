@@ -1,4 +1,4 @@
-import type { Edge, Node } from "@xyflow/react";
+import { MarkerType, type Edge, type Node } from "@xyflow/react";
 import type { FlowDefinition } from "@agentlab/contracts";
 import { topologicalLevels } from "@agentlab/flow-engine";
 
@@ -22,7 +22,13 @@ export const ROW_HEIGHT = 130;
 export const edgeId = (source: string, target: string) => `${source}->${target}`;
 
 export function makeEdge(source: string, target: string): Edge {
-  return { id: edgeId(source, target), source, target };
+  return {
+    id: edgeId(source, target),
+    source,
+    target,
+    type: "flow",
+    markerEnd: { type: MarkerType.ArrowClosed, color: "#9a9a9a", width: 18, height: 18 },
+  };
 }
 
 /** Editor graph -> FlowDefinition. An edge A->B means "B dependsOn A". */

@@ -3,9 +3,9 @@ import { dummyAgentRegistry } from "./mock/agents.js";
 import { createMockRuntime } from "./mock/runtime.js";
 
 export * from "./graph.js";
-export * from "./executor.js";
+export * from "./schedule.js";
 export * from "./serialization.js";
-export * from "./demo.js";
+export * from "./executor.js";
 export * from "./mock/agents.js";
 export * from "./mock/runtime.js";
 

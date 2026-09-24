@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FlowDefinition } from "@agentlab/contracts";
-import { codeReviewFlow, topologicalLevels, validateFlow, wouldCreateCycle } from "../src/index.js";
+import { topologicalLevels, validateFlow, wouldCreateCycle } from "../src/index.js";
+import { codeReviewFlow } from "./fixtures/codeReviewFlow.js";
 
 const flow = (nodes: FlowDefinition["nodes"]): FlowDefinition => ({ id: "f", name: "f", nodes });
 

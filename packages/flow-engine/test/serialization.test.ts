@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { codeReviewFlow, FlowParseError, parseFlow, serializeFlow } from "../src/index.js";
+import { FlowParseError, parseFlow, serializeFlow } from "../src/index.js";
+import { codeReviewFlow } from "./fixtures/codeReviewFlow.js";
 
 describe("serialization", () => {
   it("round-trips a flow", () => {

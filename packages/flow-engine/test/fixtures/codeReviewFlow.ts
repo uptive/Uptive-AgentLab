@@ -17,7 +17,3 @@ export const codeReviewFlow: FlowDefinition = {
     },
   ],
 };
-
-export const codeReviewDemoInput = {
-  prompt: "Review PR #42. Fokusera på buggar, säkerhetsrisker och regressionsrisker.",
-};

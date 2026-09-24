@@ -1,10 +1,10 @@
-import type { CSSProperties, ReactNode } from "react";
-import type { AgentDefinition, FlowDefinition, Run } from "@agentlab/contracts";
+import { useState, type CSSProperties, type ReactNode } from "react";
+import type { AgentDefinition, FlowDefinition } from "@agentlab/contracts";
 import type { FlowIssue } from "@agentlab/flow-engine";
 import { colors } from "../theme.js";
-import { StatusBadge } from "./AgentNode.js";
-import { STATUS_COLORS } from "./EditorContext.js";
+import { DANGER } from "./EditorContext.js";
 import type { AgentFlowNode, AgentNodeData, FlowMeta } from "./graphMapping.js";
+import { buttonBase, inputStyle, preStyle } from "./styles.js";
 
 interface Props {
   flow: FlowDefinition;
@@ -15,9 +15,6 @@ interface Props {
   agentsById: Map<string, AgentDefinition>;
   errors: FlowIssue[];
   levels?: string[][];
-  run?: Run;
-  runInput: string;
-  onRunInputChange: (value: string) => void;
   json: string;
   locked: boolean;
   onUpdateNode: (id: string, patch: Partial<AgentNodeData>) => void;
@@ -27,13 +24,14 @@ interface Props {
 
 export function Inspector(props: Props) {
   return (
-    <aside style={{ width: 340, borderLeft: `1px solid ${colors.bgCard}`, overflowY: "auto", padding: 12, fontSize: 13 }}>
+    <aside style={{ width: 320, borderLeft: `1px solid ${colors.bgCard}`, overflowY: "auto", padding: 12, fontSize: 13 }}>
       {props.selectedNode ? <NodePanel {...props} node={props.selectedNode} /> : <FlowPanel {...props} />}
     </aside>
   );
 }
 
-function FlowPanel({ flow, meta, onMetaChange, errors, levels, run, runInput, onRunInputChange, json, locked, agentsById }: Props) {
+function FlowPanel({ flow, meta, onMetaChange, errors, levels, json, locked, agentsById }: Props) {
+  const [showJson, setShowJson] = useState(false);
   const label = (id: string) => {
     const node = flow.nodes.find((n) => n.id === id);
     return node?.label || agentsById.get(node?.agentId ?? "")?.name || id;
@@ -62,7 +60,7 @@ function FlowPanel({ flow, meta, onMetaChange, errors, levels, run, runInput, on
         {errors.length === 0 ? (
           <div style={{ color: colors.accent }}>Flow is valid</div>
         ) : (
-          <ul style={{ margin: 0, paddingLeft: 18, color: STATUS_COLORS.failed }}>
+          <ul style={{ margin: 0, paddingLeft: 18, color: DANGER }}>
             {errors.map((e, i) => (
               <li key={i}>{e.message}</li>
             ))}
@@ -70,8 +68,8 @@ function FlowPanel({ flow, meta, onMetaChange, errors, levels, run, runInput, on
         )}
       </Section>
 
-      {levels ? (
-        <Section title="Execution plan">
+      {levels && levels.length > 0 ? (
+        <Section title="Execution order">
           <ol style={{ margin: 0, paddingLeft: 18 }}>
             {levels.map((level, i) => (
               <li key={i} style={{ marginBottom: 4 }}>
@@ -83,42 +81,25 @@ function FlowPanel({ flow, meta, onMetaChange, errors, levels, run, runInput, on
         </Section>
       ) : null}
 
-      <Section title="Test run (mock agents)">
-        <Field label="Input prompt">
-          <textarea
-            style={{ ...inputStyle, minHeight: 60, resize: "vertical" }}
-            value={runInput}
-            onChange={(e) => onRunInputChange(e.target.value)}
-          />
-        </Field>
-        {run ? (
-          <div style={{ display: "grid", gap: 4 }}>
-            <div>
-              Status: <StatusBadge status={run.status} />
-            </div>
-            {run.totalUsage ? (
-              <div style={{ opacity: 0.8 }}>
-                {run.totalUsage.inputTokens + run.totalUsage.outputTokens} tokens · ${run.totalUsage.estimatedCostUsd.toFixed(4)} ·{" "}
-                {run.totalUsage.latencyMs} ms
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </Section>
-
-      <Section title="JSON">
-        <pre style={preStyle}>{json}</pre>
-      </Section>
+      <section style={{ marginBottom: 18 }}>
+        <button
+          onClick={() => setShowJson((v) => !v)}
+          aria-expanded={showJson}
+          style={{ ...sectionTitle, background: "none", border: "none", padding: 0, color: colors.secondary, cursor: "pointer", display: "flex", gap: 6 }}
+        >
+          <span style={{ display: "inline-block", width: 10, transform: showJson ? "rotate(90deg)" : "none", transition: "transform 120ms" }}>▸</span>
+          JSON
+        </button>
+        {showJson ? <pre style={preStyle}>{json}</pre> : null}
+      </section>
     </>
   );
 }
 
-function NodePanel({ node, flow, agents, agentsById, run, locked, onUpdateNode, onDeleteNode, onRemoveEdge }: Props & { node: AgentFlowNode }) {
+function NodePanel({ node, flow, agents, agentsById, locked, onUpdateNode, onDeleteNode, onRemoveEdge }: Props & { node: AgentFlowNode }) {
   const agent = agentsById.get(node.data.agentId);
-  const flowNode = flow.nodes.find((n) => n.id === node.id);
-  const dependsOn = flowNode?.dependsOn ?? [];
+  const dependsOn = flow.nodes.find((n) => n.id === node.id)?.dependsOn ?? [];
   const dependents = flow.nodes.filter((n) => n.dependsOn.includes(node.id)).map((n) => n.id);
-  const step = run?.steps.find((s) => s.nodeId === node.id);
 
   return (
     <>
@@ -136,12 +117,7 @@ function NodePanel({ node, flow, agents, agentsById, run, locked, onUpdateNode, 
           />
         </Field>
         <Field label="Agent">
-          <select
-            style={inputStyle}
-            value={node.data.agentId}
-            disabled={locked}
-            onChange={(e) => onUpdateNode(node.id, { agentId: e.target.value })}
-          >
+          <select style={inputStyle} value={node.data.agentId} disabled={locked} onChange={(e) => onUpdateNode(node.id, { agentId: e.target.value })}>
             {!agent ? <option value={node.data.agentId}>Unknown: {node.data.agentId}</option> : null}
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
@@ -166,7 +142,7 @@ function NodePanel({ node, flow, agents, agentsById, run, locked, onUpdateNode, 
         ) : (
           <>
             {dependsOn.length > 1 ? (
-              <div style={{ opacity: 0.6, marginBottom: 6 }}>Starts after all of these complete; receives their outputs keyed by node id.</div>
+              <div style={{ opacity: 0.6, marginBottom: 6 }}>Starts after all of these complete and receives all of their outputs.</div>
             ) : null}
             {dependsOn.map((dep) => (
               <div key={dep} style={rowStyle}>
@@ -194,31 +170,8 @@ function NodePanel({ node, flow, agents, agentsById, run, locked, onUpdateNode, 
         )}
       </Section>
 
-      {step ? (
-        <Section title="Last run">
-          <div style={{ marginBottom: 6 }}>
-            <StatusBadge status={step.status} />
-            {step.usage ? <span style={{ marginLeft: 8, opacity: 0.7 }}>{step.usage.latencyMs} ms</span> : null}
-          </div>
-          {step.error ? <div style={{ color: STATUS_COLORS.failed, marginBottom: 6 }}>{step.error}</div> : null}
-          {step.input !== undefined ? (
-            <Field label="Input">
-              <pre style={preStyle}>{JSON.stringify(step.input, null, 2)}</pre>
-            </Field>
-          ) : null}
-          {step.output !== undefined ? (
-            <Field label="Output">
-              <pre style={preStyle}>{JSON.stringify(step.output, null, 2)}</pre>
-            </Field>
-          ) : null}
-        </Section>
-      ) : null}
-
       {!locked ? (
-        <button
-          style={{ ...buttonBase, background: "transparent", color: STATUS_COLORS.failed, border: `1px solid ${STATUS_COLORS.failed}` }}
-          onClick={() => onDeleteNode(node.id)}
-        >
+        <button style={{ ...buttonBase, background: "transparent", color: DANGER, border: `1px solid ${DANGER}` }} onClick={() => onDeleteNode(node.id)}>
           Delete step
         </button>
       ) : null}
@@ -229,7 +182,7 @@ function NodePanel({ node, flow, agents, agentsById, run, locked, onUpdateNode, 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section style={{ marginBottom: 18 }}>
-      <h3 style={{ margin: "0 0 8px", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, opacity: 0.7 }}>{title}</h3>
+      <h3 style={{ ...sectionTitle, margin: "0 0 8px" }}>{title}</h3>
       {children}
     </section>
   );
@@ -244,46 +197,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export const buttonBase: CSSProperties = {
-  padding: "6px 12px",
-  borderRadius: 6,
-  border: `1px solid ${colors.bgCard}`,
-  background: colors.bgGrey,
-  color: colors.secondary,
-  cursor: "pointer",
-  fontSize: 13,
-};
-
-const inputStyle: CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "6px 8px",
-  borderRadius: 6,
-  border: `1px solid ${colors.bgCard}`,
-  background: colors.bgBlack,
-  color: colors.secondary,
-  fontFamily: "inherit",
-  fontSize: 13,
-};
-
-const preStyle: CSSProperties = {
-  margin: 0,
-  padding: 8,
-  borderRadius: 6,
-  background: colors.bgBlack,
-  fontSize: 11,
-  maxHeight: 260,
-  overflow: "auto",
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
-};
-
+const sectionTitle: CSSProperties = { fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, opacity: 0.7 };
 const rowStyle: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0" };
-
-const linkButton: CSSProperties = {
-  background: "none",
-  border: "none",
-  color: STATUS_COLORS.failed,
-  cursor: "pointer",
-  fontSize: 12,
-};
+const linkButton: CSSProperties = { background: "none", border: "none", color: DANGER, cursor: "pointer", fontSize: 12 };
