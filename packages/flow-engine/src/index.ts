@@ -1,11 +1,16 @@
-import type { FlowDefinition, Run } from "@agentlab/contracts";
+import { createFlowEngine } from "./executor.js";
+import { dummyAgentRegistry } from "./mock/agents.js";
+import { createMockRuntime } from "./mock/runtime.js";
 
-export interface FlowEngine {
-  execute(flow: FlowDefinition, input: unknown): Promise<Run>;
-}
+export * from "./graph.js";
+export * from "./executor.js";
+export * from "./serialization.js";
+export * from "./demo.js";
+export * from "./mock/agents.js";
+export * from "./mock/runtime.js";
 
-export const engine: FlowEngine = {
-  async execute(flow: FlowDefinition, input: unknown): Promise<Run> {
-    throw new Error(`Not implemented: execute(${flow.id}), input: ${JSON.stringify(input)}`);
-  },
-};
+/** Default engine wired to dummy agents and a mock runtime until real ones exist. */
+export const engine = createFlowEngine({
+  runtime: createMockRuntime(),
+  resolveAgent: dummyAgentRegistry.get,
+});

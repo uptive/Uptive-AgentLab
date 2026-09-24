@@ -6,15 +6,15 @@ import { OptimizeView } from "./views/OptimizeView.js";
 import { colors } from "./theme.js";
 
 const TABS = [
-  { id: "agents", label: "Agents", view: AgentsView },
-  { id: "flows", label: "Flows", view: FlowsView },
-  { id: "runs", label: "Runs", view: RunsView },
-  { id: "optimize", label: "Optimize", view: OptimizeView },
+  { id: "agents", label: "Agents", view: AgentsView, fullBleed: false },
+  { id: "flows", label: "Flows", view: FlowsView, fullBleed: true },
+  { id: "runs", label: "Runs", view: RunsView, fullBleed: false },
+  { id: "optimize", label: "Optimize", view: OptimizeView, fullBleed: false },
 ] as const;
 
 export function App() {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["id"]>("agents");
-  const ActiveView = TABS.find((tab) => tab.id === activeTab)!.view;
+  const { view: ActiveView, fullBleed } = TABS.find((tab) => tab.id === activeTab)!;
 
   return (
     <div
@@ -49,7 +49,7 @@ export function App() {
           </button>
         ))}
       </nav>
-      <main style={{ flex: 1, padding: 24, overflow: "auto" }}>
+      <main style={{ flex: 1, minWidth: 0, padding: fullBleed ? 0 : 24, overflow: fullBleed ? "hidden" : "auto" }}>
         <ActiveView />
       </main>
     </div>

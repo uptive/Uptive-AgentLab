@@ -1,8 +1,32 @@
+export interface FlowNodePosition {
+  x: number;
+  y: number;
+}
+
+/**
+ * A single step in a flow. Each node runs exactly one agent.
+ *
+ * Edges are expressed via `dependsOn`: a node starts once *all* nodes listed
+ * there have completed (join). Nodes whose dependencies are satisfied at the
+ * same time run in parallel; a chain of single dependencies runs sequentially.
+ */
 export interface FlowNode {
   id: string;
   agentId: string;
+  /** Ids of upstream nodes that must complete before this node starts. */
   dependsOn: string[];
+  /**
+   * Optional explicit input shape. Keys are fields of the input object passed
+   * to the agent; values are references:
+   *   - "$input" / "$input.some.path"   -> the flow input
+   *   - "<nodeId>" / "<nodeId>.path"    -> output of an upstream node (must be in `dependsOn`)
+   * When omitted, the engine derives the input from the dependencies.
+   */
   inputMapping?: Record<string, string>;
+  /** Optional display label; falls back to the agent name in the UI. */
+  label?: string;
+  /** Canvas position used by the flow editor. Ignored by the engine. */
+  position?: FlowNodePosition;
 }
 
 export interface FlowDefinition {
