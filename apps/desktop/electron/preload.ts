@@ -1,18 +1,19 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type AgentLabApi, type AgentsApi, type AgentSource } from "./api.js";
+import { IPC, type AgentDraftRequest, type AgentLabApi, type AgentSource } from "./api.js";
 import type { AgentInput, FlowDefinition, FlowStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 
 // Agents live in MongoDB or in the local agents folder, both handled by the main process.
 // Telemetry exposes both the async CRUD API (for future main-process producers) and the
 // load/save adapter used by the renderer's sync TelemetryStore.
-const agents: AgentsApi = {
+const agents: AgentLabApi["agents"] = {
   list: async () => (await ipcRenderer.invoke("agents:load")).agents,
   load: (options?: { reloadLocal?: boolean }) => ipcRenderer.invoke("agents:load", options),
   get: (id: string) => ipcRenderer.invoke("agents:get", id),
   create: (input: AgentInput, source?: AgentSource) => ipcRenderer.invoke("agents:create", input, source),
   update: (id: string, patch: Partial<AgentInput>) => ipcRenderer.invoke("agents:update", id, patch),
   delete: (id: string) => ipcRenderer.invoke("agents:delete", id),
+  draft: (request: AgentDraftRequest) => ipcRenderer.invoke("agents:draft", request),
 };
 
 const cloudFlows: FlowStore = {
@@ -49,6 +50,7 @@ const api: AgentLabApi = {
   },
   agents,
   cloudFlows,
+  roles: { list: () => ipcRenderer.invoke("roles:list") },
   telemetry,
   optimization: {
     generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),

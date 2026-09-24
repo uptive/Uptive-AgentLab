@@ -1,5 +1,5 @@
 import type { Db } from "mongodb";
-import type { AgentDefinition, AgentStore } from "@agentlab/contracts";
+import { DEFAULT_AGENT_ROLES, type AgentDefinition, type AgentRoleStore, type AgentStore } from "@agentlab/contracts";
 import { validateAgentInput } from "./agentStore.js";
 
 // Node-only: import this from the Electron main process, never the renderer.
@@ -53,5 +53,32 @@ export async function createMongoAgentStore(db: Db): Promise<AgentStore> {
       const result = await agents.deleteOne({ _id: id });
       return result.deletedCount === 1;
     },
+  };
+}
+
+/** Role docs are keyed by the lowercased name so "Reviewer" and "reviewer" are one role. */
+type RoleDoc = { _id: string; name: string; createdAt: string };
+
+export async function createMongoRoleStore(db: Db): Promise<AgentRoleStore> {
+  const roles = db.collection<RoleDoc>("agent_roles");
+
+  async function add(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await roles.updateOne(
+      { _id: trimmed.toLowerCase() },
+      { $setOnInsert: { name: trimmed, createdAt: new Date().toISOString() } },
+      { upsert: true },
+    );
+  }
+
+  if ((await roles.estimatedDocumentCount()) === 0) await Promise.all(DEFAULT_AGENT_ROLES.map(add));
+
+  return {
+    async list() {
+      const docs = await roles.find().sort({ _id: 1 }).toArray();
+      return docs.map((doc) => doc.name);
+    },
+    add,
   };
 }

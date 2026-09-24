@@ -49,6 +49,27 @@ export interface AgentsApi {
   delete(id: string): Promise<boolean>;
 }
 
+export interface AgentDraftRequest {
+  /** Free-text description of what the agent should achieve. */
+  description: string;
+  /** Model ids the draft may pick from. */
+  models: string[];
+}
+
+/** Agent fields proposed by Claude from a free-text description; reviewed in the form before applying. */
+export interface AgentDraft {
+  name: string;
+  description: string;
+  role: string;
+  systemInstructions: string;
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  tools: { name: string; kind: "mcp" | "function" }[];
+  inputSchema: unknown;
+  outputSchema: unknown;
+}
+
 export interface AgentLabApi {
   projects: {
     list(): Promise<ProjectsState>;
@@ -66,9 +87,16 @@ export interface AgentLabApi {
     /** Writes a registered flow file. */
     write(filePath: string, json: string): Promise<ProjectEntry>;
   };
-  agents: AgentsApi;
+  agents: AgentsApi & {
+    /** Asks the claude CLI to map a description into agent fields. Nothing is saved. */
+    draft(request: AgentDraftRequest): Promise<AgentDraft>;
+  };
   /** Flows saved to MongoDB. Independent of the local file flows above — not synced with them. */
   cloudFlows: FlowStore;
+  roles: {
+    /** Reusable role names, persisted in MongoDB. */
+    list(): Promise<string[]>;
+  };
   /** Telemetry CRUD plus the load/save snapshot adapter used by the renderer's sync TelemetryStore. */
   telemetry: AsyncTelemetryStore & {
     load(): Promise<PersistedState | null>;

@@ -1,6 +1,6 @@
-import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import type { AgentDefinition, AgentInput, AgentStatus, ToolRef } from "@agentlab/contracts";
-import type { AgentSource, SourcedAgent } from "../../electron/api.js";
+import type { AgentDraft, AgentSource, SourcedAgent } from "../../electron/api.js";
 import { theme } from "../theme.js";
 
 const MODELS = ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-fable-5-1"];
@@ -85,6 +85,30 @@ function toInput(form: FormState, existing?: AgentDefinition): AgentInput {
     inputSchema: parseSchema("Input schema", form.inputSchema),
     outputSchema: parseSchema("Output schema", form.outputSchema),
     limits: { maxTokens: toNumber(form.limitMaxTokens), maxCostUsd: toNumber(form.limitMaxCostUsd) },
+  };
+}
+
+const toolId = (name: string) => name.toLowerCase().replace(/\s+/g, "-");
+
+/** Overlays a Claude-generated draft on the form; status and limits stay as the user set them. */
+function applyDraft(form: FormState, draft: AgentDraft): FormState {
+  const tools: ToolRef[] = [];
+  for (const tool of draft.tools) {
+    const id = toolId(tool.name.trim());
+    if (id && !tools.some((t) => t.id === id)) tools.push({ id, name: tool.name.trim(), kind: tool.kind });
+  }
+  return {
+    ...form,
+    name: draft.name,
+    description: draft.description,
+    role: draft.role,
+    systemInstructions: draft.systemInstructions,
+    model: draft.model,
+    temperature: draft.temperature.toString(),
+    maxTokens: draft.maxTokens.toString(),
+    tools,
+    inputSchema: stringifySchema(draft.inputSchema),
+    outputSchema: stringifySchema(draft.outputSchema),
   };
 }
 
@@ -256,7 +280,7 @@ function ToolChips({ tools, onChange }: { tools: ToolRef[]; onChange: (tools: To
   function add() {
     const trimmed = name.trim();
     if (!trimmed || tools.some((tool) => tool.name === trimmed)) return;
-    onChange([...tools, { id: trimmed.toLowerCase().replace(/\s+/g, "-"), name: trimmed, kind }]);
+    onChange([...tools, { id: toolId(trimmed), name: trimmed, kind }]);
     setName("");
   }
 
@@ -325,6 +349,130 @@ function ToolChips({ tools, onChange }: { tools: ToolRef[]; onChange: (tools: To
         </button>
       </div>
     </div>
+  );
+}
+
+function DescribeBox({
+  value,
+  onChange,
+  onGenerate,
+  generating,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onGenerate: () => void;
+  generating: boolean;
+}) {
+  return (
+    <section
+      style={{
+        marginBottom: 22,
+        padding: 14,
+        borderRadius: 10,
+        border: `1px solid ${theme.border}`,
+        background: theme.codeBg,
+      }}
+    >
+      <h3 style={{ ...titleStyle, fontSize: 14, marginBottom: 4 }}>Describe your agent</h3>
+      <p style={{ margin: "0 0 10px", fontSize: 13, color: theme.textSecondary }}>
+        Explain what it should achieve and Claude will propose the fields below.
+      </p>
+      <textarea
+        aria-label="Agent description for Claude"
+        style={{ ...fieldInput, minHeight: 90, resize: "vertical", lineHeight: 1.5 }}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            if (!generating) onGenerate();
+          }
+        }}
+        placeholder="e.g. Reviews pull request diffs for security issues and returns a list of findings with severity and a suggested fix"
+        disabled={generating}
+      />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
+        {generating ? <span style={{ fontSize: 13, color: theme.textMuted }}>Claude is drafting… this can take a minute</span> : null}
+        <button
+          type="button"
+          style={{ ...pillButton, opacity: generating || !value.trim() ? 0.6 : 1 }}
+          onClick={onGenerate}
+          disabled={generating || !value.trim()}
+        >
+          {generating ? "Generating…" : "Generate fields"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function DraftRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <span style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 3 }}>{label}</span>
+      <div style={{ fontSize: 14, color: theme.text, lineHeight: 1.45 }}>{children}</div>
+    </div>
+  );
+}
+
+const draftCode: CSSProperties = {
+  margin: 0,
+  padding: "8px 10px",
+  maxHeight: 180,
+  overflow: "auto",
+  borderRadius: 6,
+  background: theme.surface,
+  border: `1px solid ${theme.border}`,
+  fontFamily: theme.fontMono,
+  fontSize: 12,
+  whiteSpace: "pre-wrap",
+};
+
+function DraftPreview({ draft, onApply, onDiscard }: { draft: AgentDraft; onApply: () => void; onDiscard: () => void }) {
+  return (
+    <section
+      aria-label="Proposed agent fields"
+      style={{
+        marginBottom: 22,
+        padding: 14,
+        borderRadius: 10,
+        border: `1px solid ${theme.primary}`,
+        background: theme.codeBg,
+      }}
+    >
+      <h3 style={{ ...titleStyle, fontSize: 14, marginBottom: 12 }}>Proposed fields</h3>
+      <DraftRow label="Name">{draft.name}</DraftRow>
+      <DraftRow label="Description">{draft.description}</DraftRow>
+      <DraftRow label="Role">{draft.role}</DraftRow>
+      <DraftRow label="Model">
+        <span style={{ fontFamily: theme.fontMono, fontSize: 13 }}>{draft.model}</span>
+        <span style={{ color: theme.textMuted }}>
+          {" "}
+          · temperature {draft.temperature} · max tokens {draft.maxTokens}
+        </span>
+      </DraftRow>
+      <DraftRow label="Tools">
+        {draft.tools.length ? draft.tools.map((tool) => `${tool.name} (${tool.kind})`).join(", ") : "None"}
+      </DraftRow>
+      <DraftRow label="System instructions">
+        <pre style={draftCode}>{draft.systemInstructions}</pre>
+      </DraftRow>
+      <details style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>
+        <summary style={{ cursor: "pointer" }}>Input / output schema</summary>
+        <div style={{ ...twoColumns, marginTop: 8 }}>
+          <pre style={draftCode}>{stringifySchema(draft.inputSchema)}</pre>
+          <pre style={draftCode}>{stringifySchema(draft.outputSchema)}</pre>
+        </div>
+      </details>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" style={ghostButton} onClick={onDiscard}>
+          Discard
+        </button>
+        <button type="button" style={pillButton} onClick={onApply}>
+          Apply to form
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -528,6 +676,12 @@ export function AgentsView() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saveTo, setSaveTo] = useState<AgentSource>("database");
   const [saving, setSaving] = useState(false);
+  const [roles, setRoles] = useState<string[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [draft, setDraft] = useState<AgentDraft>();
+  const [generating, setGenerating] = useState(false);
+  // Bumped whenever the drawer opens or closes, so a draft that finishes afterwards is dropped.
+  const draftRequest = useRef(0);
 
   async function refresh(reloadLocal = false) {
     setLoading(true);
@@ -550,7 +704,11 @@ export function AgentsView() {
   const drawerOpen = editing !== undefined;
 
   useEffect(() => {
+    draftRequest.current++;
+    setGenerating(false);
     if (!drawerOpen) return;
+    // Suggestions only; the form still works if the role list can't be loaded.
+    window.agentlab.roles.list().then(setRoles, () => setRoles([]));
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setEditing(undefined);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -561,6 +719,22 @@ export function AgentsView() {
     setEditing(null);
     setForm(EMPTY_FORM);
     setSaveTo(databaseError ? "local" : "database");
+    setPrompt("");
+    setDraft(undefined);
+  }
+
+  async function handleGenerate() {
+    const request = ++draftRequest.current;
+    setGenerating(true);
+    setError(undefined);
+    try {
+      const result = await window.agentlab.agents.draft({ description: prompt, models: MODELS });
+      if (request === draftRequest.current) setDraft(result);
+    } catch (e) {
+      if (request === draftRequest.current) setError(errorMessage(e));
+    } finally {
+      if (request === draftRequest.current) setGenerating(false);
+    }
   }
 
   function openEdit(agent: SourcedAgent) {
@@ -723,6 +897,21 @@ export function AgentsView() {
             <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
               {error ? <ErrorBanner message={error} onDismiss={() => setError(undefined)} /> : null}
 
+              {editing === null ? (
+                draft ? (
+                  <DraftPreview
+                    draft={draft}
+                    onApply={() => {
+                      setForm((prev) => applyDraft(prev, draft));
+                      setDraft(undefined);
+                    }}
+                    onDiscard={() => setDraft(undefined)}
+                  />
+                ) : (
+                  <DescribeBox value={prompt} onChange={setPrompt} onGenerate={() => void handleGenerate()} generating={generating} />
+                )
+              ) : null}
+
               {editing ? null : (
                 <SourcePicker value={saveTo} onChange={setSaveTo} databaseError={databaseError} />
               )}
@@ -745,11 +934,17 @@ export function AgentsView() {
               <Field label="Role *">
                 <input
                   style={fieldInput}
+                  list="agent-roles"
                   value={form.role}
                   onChange={set("role")}
-                  placeholder="e.g. Researches sources and summarizes findings"
+                  placeholder="Pick or type a role, e.g. reviewer"
                   required
                 />
+                <datalist id="agent-roles">
+                  {roles.map((role) => (
+                    <option key={role} value={role} />
+                  ))}
+                </datalist>
               </Field>
               <Field label="System instructions *">
                 <textarea

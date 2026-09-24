@@ -4,16 +4,27 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MongoClient, ServerApiVersion } from "mongodb";
-import type { AgentDefinition, AgentInput, AgentStore, FlowDefinition, FlowStore, Run, TraceEvent } from "@agentlab/contracts";
+import {
+  DEFAULT_AGENT_ROLES,
+  type AgentDefinition,
+  type AgentInput,
+  type AgentRoleStore,
+  type AgentStore,
+  type FlowDefinition,
+  type FlowStore,
+  type Run,
+  type TraceEvent,
+} from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
-import { createMongoAgentStore } from "@agentlab/agent-runtime/mongo";
+import { createMongoAgentStore, createMongoRoleStore } from "@agentlab/agent-runtime/mongo";
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
 import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
 import type { JsonRequest } from "@agentlab/optimization";
 import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
-import { IPC, type AgentListing, type AgentSource, type ProjectEntry, type SourcedAgent } from "./api.js";
+import { generateAgentDraft } from "./agentDraft.js";
+import { IPC, type AgentDraftRequest, type AgentListing, type AgentSource, type ProjectEntry, type SourcedAgent } from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,6 +54,7 @@ interface Stores {
   client: MongoClient;
   agents: AgentStore;
   flows: FlowStore;
+  roles: AgentRoleStore;
   telemetry: AsyncTelemetryStore;
 }
 
@@ -59,15 +71,16 @@ async function connect(): Promise<Stores> {
   });
   await client.connect();
   const db = client.db(process.env.MONGODB_DB || "agentlab");
-  const [agents, flows, telemetry] = await Promise.all([
+  const [agents, flows, roles, telemetry] = await Promise.all([
     createMongoAgentStore(db),
     createMongoFlowStore(db),
+    createMongoRoleStore(db),
     createMongoTelemetryStore(db),
   ]);
 
   // Flows saved to MongoDB are independent of local flow files (no mirroring): the flows list
   // shows both sources together, and the user picks where each flow lives.
-  return { client, agents, flows, telemetry };
+  return { client, agents, flows, roles, telemetry };
 }
 
 function getStores(): Promise<Stores> {
@@ -111,6 +124,24 @@ async function agentStoreFor(id: string): Promise<[AgentStore, AgentSource]> {
   await localAgentsLoaded;
   if (await localAgents.get(id)) return [localAgents, "local"];
   return [(await getStores()).agents, "database"];
+}
+
+/** Adds a saved agent's role to the reusable list. Best effort, so local agents still save without MongoDB. */
+async function rememberRole(role: string) {
+  try {
+    await (await getStores()).roles.add(role);
+  } catch (error) {
+    console.warn("[roles] could not save role:", (error as Error).message);
+  }
+}
+
+/** The reusable roles from MongoDB, or the defaults when MongoDB is unreachable. */
+async function listRoles(): Promise<string[]> {
+  try {
+    return await (await getStores()).roles.list();
+  } catch {
+    return DEFAULT_AGENT_ROLES;
+  }
 }
 
 // Telemetry payload guard for the load/save bridge used by the renderer's RunPersistenceAdapter.
@@ -207,16 +238,23 @@ function registerIpc(store: EditorConfigStore) {
     await localAgentsLoaded;
     const target: AgentSource = source === "local" ? "local" : "database";
     const store = target === "local" ? localAgents : (await getStores()).agents;
-    return tag(target)(await store.create(withoutSource(input)));
+    const agent = await store.create(withoutSource(input));
+    await rememberRole(agent.role);
+    return tag(target)(agent);
   });
   ipcMain.handle("agents:update", async (_e, id: string, patch: Partial<AgentInput>) => {
     const [store, source] = await agentStoreFor(id);
-    return tag(source)(await store.update(id, withoutSource(patch)));
+    const agent = await store.update(id, withoutSource(patch));
+    if (patch.role !== undefined) await rememberRole(agent.role);
+    return tag(source)(agent);
   });
   ipcMain.handle("agents:delete", async (_e, id: string) => {
     const [store] = await agentStoreFor(id);
     return store.delete(id);
   });
+  // Roles are read here rather than passed from the renderer, so the draft always sees the current list.
+  ipcMain.handle("agents:draft", async (_e, request: AgentDraftRequest) => generateAgentDraft(request, await listRoles()));
+  ipcMain.handle("roles:list", () => listRoles());
 
   // Model calls for LLM-backed evaluators run here so API credentials never reach the renderer.
   const modelClient = createAnthropicModelClient();
