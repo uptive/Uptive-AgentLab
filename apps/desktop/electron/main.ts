@@ -4,12 +4,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MongoClient, ServerApiVersion } from "mongodb";
-import type { AgentDefinition, AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
+import type { AgentDefinition, AgentInput, AgentStore, FlowDefinition, FlowStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
 import { createMongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
+import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
 import type { JsonRequest } from "@agentlab/optimization";
 import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
 import { IPC, type AgentListing, type AgentSource, type ProjectEntry, type SourcedAgent } from "./api.js";
@@ -41,6 +42,7 @@ for (const envPath of [path.resolve(__dirname, "../.env"), path.resolve(__dirnam
 interface Stores {
   client: MongoClient;
   agents: AgentStore;
+  flows: FlowStore;
   telemetry: AsyncTelemetryStore;
 }
 
@@ -57,8 +59,15 @@ async function connect(): Promise<Stores> {
   });
   await client.connect();
   const db = client.db(process.env.MONGODB_DB || "agentlab");
-  const [agents, telemetry] = await Promise.all([createMongoAgentStore(db), createMongoTelemetryStore(db)]);
-  return { client, agents, telemetry };
+  const [agents, flows, telemetry] = await Promise.all([
+    createMongoAgentStore(db),
+    createMongoFlowStore(db),
+    createMongoTelemetryStore(db),
+  ]);
+
+  // Flows saved to MongoDB are independent of local flow files (no mirroring): the flows list
+  // shows both sources together, and the user picks where each flow lives.
+  return { client, agents, flows, telemetry };
 }
 
 function getStores(): Promise<Stores> {
@@ -212,6 +221,11 @@ function registerIpc(store: EditorConfigStore) {
   // Model calls for LLM-backed evaluators run here so API credentials never reach the renderer.
   const modelClient = createAnthropicModelClient();
   ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
+
+  ipcMain.handle(IPC.listCloudFlows, async () => (await getStores()).flows.list());
+  ipcMain.handle(IPC.getCloudFlow, async (_e, id: string) => (await getStores()).flows.get(id));
+  ipcMain.handle(IPC.saveCloudFlow, async (_e, flow: FlowDefinition) => (await getStores()).flows.save(flow));
+  ipcMain.handle(IPC.deleteCloudFlow, async (_e, id: string) => (await getStores()).flows.delete(id));
 
   ipcMain.handle("telemetry:recordEvent", async (_e, event: TraceEvent) => (await getStores()).telemetry.recordEvent(event));
   ipcMain.handle("telemetry:listEvents", async (_e, runId: string) => (await getStores()).telemetry.listEvents(runId));

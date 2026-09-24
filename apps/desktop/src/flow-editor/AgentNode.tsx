@@ -4,7 +4,8 @@ import type { AgentFlowNode } from "./graphMapping.js";
 import { DANGER, DEMO_COLORS, useEditorContext } from "./EditorContext.js";
 import type { DemoNodeFrame } from "./useDemoRun.js";
 
-const handleStyle = { width: 12, height: 12, background: theme.primary, border: `2px solid ${theme.surface}` };
+// Border matches the canvas background (not the node's own fill) so the handle reads as a cutout.
+const handleStyle = { width: 12, height: 12, background: theme.primary, border: `2px solid ${theme.canvasBg}` };
 
 export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
   const { agentsById, incoming, invalidNodeIds, demo } = useEditorContext();

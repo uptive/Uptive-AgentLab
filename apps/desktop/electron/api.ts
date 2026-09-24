@@ -1,6 +1,6 @@
 /** Shared contract for the preload bridge (`window.agentlab`). Types only + channel names. */
 
-import type { AgentDefinition, AgentInput, Run, TraceEvent } from "@agentlab/contracts";
+import type { AgentDefinition, AgentInput, FlowStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import type { JsonRequest } from "@agentlab/optimization";
 
@@ -67,6 +67,8 @@ export interface AgentLabApi {
     write(filePath: string, json: string): Promise<ProjectEntry>;
   };
   agents: AgentsApi;
+  /** Flows saved to MongoDB. Independent of the local file flows above — not synced with them. */
+  cloudFlows: FlowStore;
   /** Telemetry CRUD plus the load/save snapshot adapter used by the renderer's sync TelemetryStore. */
   telemetry: AsyncTelemetryStore & {
     load(): Promise<PersistedState | null>;
@@ -86,5 +88,9 @@ export const IPC = {
   revealProject: "projects:reveal",
   readFlow: "flows:read",
   writeFlow: "flows:write",
+  listCloudFlows: "cloudFlows:list",
+  getCloudFlow: "cloudFlows:get",
+  saveCloudFlow: "cloudFlows:save",
+  deleteCloudFlow: "cloudFlows:delete",
   generateJson: "optimization:generate-json",
 } as const;

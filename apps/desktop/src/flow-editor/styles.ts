@@ -19,13 +19,14 @@ export const primaryButton: CSSProperties = {
   fontWeight: 600,
 };
 
+// codeBg (not surface) so inputs read as recessed against the surface-colored panels that contain them.
 export const inputStyle: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
   padding: "6px 8px",
   borderRadius: 6,
   border: `1px solid ${theme.border}`,
-  background: theme.surface,
+  background: theme.codeBg,
   color: theme.text,
   fontFamily: "inherit",
   fontSize: 13,
