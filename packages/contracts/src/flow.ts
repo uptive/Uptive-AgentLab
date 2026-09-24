@@ -35,3 +35,16 @@ export interface FlowDefinition {
   description?: string;
   nodes: FlowNode[];
 }
+
+export interface FlowRecord extends FlowDefinition {
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Persistence for flows saved to MongoDB. Flows keep their own client-chosen id (unlike agents), so writes are an upsert. */
+export interface FlowStore {
+  list(): Promise<FlowRecord[]>;
+  get(id: string): Promise<FlowRecord | undefined>;
+  save(flow: FlowDefinition): Promise<FlowRecord>;
+  delete(id: string): Promise<boolean>;
+}

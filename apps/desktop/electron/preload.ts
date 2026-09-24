@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type AgentLabApi } from "./api.js";
-import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
+import type { AgentInput, AgentStore, FlowDefinition, FlowStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 
 // Agents live in MongoDB via the main process. Telemetry exposes both the async CRUD
@@ -12,6 +12,13 @@ const agents: AgentStore = {
   create: (input: AgentInput) => ipcRenderer.invoke("agents:create", input),
   update: (id: string, patch: Partial<AgentInput>) => ipcRenderer.invoke("agents:update", id, patch),
   delete: (id: string) => ipcRenderer.invoke("agents:delete", id),
+};
+
+const cloudFlows: FlowStore = {
+  list: () => ipcRenderer.invoke(IPC.listCloudFlows),
+  get: (id: string) => ipcRenderer.invoke(IPC.getCloudFlow, id),
+  save: (flow: FlowDefinition) => ipcRenderer.invoke(IPC.saveCloudFlow, flow),
+  delete: (id: string) => ipcRenderer.invoke(IPC.deleteCloudFlow, id),
 };
 
 const telemetry: AsyncTelemetryStore & {
@@ -40,6 +47,7 @@ const api: AgentLabApi = {
     write: (filePath, json) => ipcRenderer.invoke(IPC.writeFlow, filePath, json),
   },
   agents,
+  cloudFlows,
   telemetry,
 };
 

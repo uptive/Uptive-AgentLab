@@ -1,7 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import type { AgentDefinition, FlowDefinition } from "@agentlab/contracts";
 import type { FlowIssue } from "@agentlab/flow-engine";
-import { colors } from "../theme.js";
+import { theme } from "../theme.js";
 import { DANGER } from "./EditorContext.js";
 import type { AgentFlowNode, AgentNodeData, FlowMeta } from "./graphMapping.js";
 import { buttonBase, inputStyle, preStyle } from "./styles.js";
@@ -24,7 +24,7 @@ interface Props {
 
 export function Inspector(props: Props) {
   return (
-    <aside style={{ width: 320, borderLeft: `1px solid ${colors.bgCard}`, overflowY: "auto", padding: 12, fontSize: 13 }}>
+    <aside style={{ width: 320, borderLeft: `1px solid ${theme.border}`, overflowY: "auto", padding: 12, fontSize: 13 }}>
       {props.selectedNode ? <NodePanel {...props} node={props.selectedNode} /> : <FlowPanel {...props} />}
     </aside>
   );
@@ -58,7 +58,7 @@ function FlowPanel({ flow, meta, onMetaChange, errors, levels, json, locked, age
 
       <Section title={errors.length ? `Problems (${errors.length})` : "Validation"}>
         {errors.length === 0 ? (
-          <div style={{ color: colors.accent }}>Flow is valid</div>
+          <div style={{ color: theme.statusActive }}>Flow is valid</div>
         ) : (
           <ul style={{ margin: 0, paddingLeft: 18, color: DANGER }}>
             {errors.map((e, i) => (
@@ -85,7 +85,7 @@ function FlowPanel({ flow, meta, onMetaChange, errors, levels, json, locked, age
         <button
           onClick={() => setShowJson((v) => !v)}
           aria-expanded={showJson}
-          style={{ ...sectionTitle, background: "none", border: "none", padding: 0, color: colors.secondary, cursor: "pointer", display: "flex", gap: 6 }}
+          style={{ ...sectionTitle, background: "none", border: "none", padding: 0, color: theme.text, cursor: "pointer", display: "flex", gap: 6 }}
         >
           <span style={{ display: "inline-block", width: 10, transform: showJson ? "rotate(90deg)" : "none", transition: "transform 120ms" }}>▸</span>
           JSON

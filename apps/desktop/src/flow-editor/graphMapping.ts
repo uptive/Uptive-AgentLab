@@ -1,6 +1,7 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
 import type { FlowDefinition } from "@agentlab/contracts";
 import { topologicalLevels } from "@agentlab/flow-engine";
+import { theme } from "../theme.js";
 
 export type AgentNodeData = {
   agentId: string;
@@ -27,7 +28,7 @@ export function makeEdge(source: string, target: string): Edge {
     source,
     target,
     type: "flow",
-    markerEnd: { type: MarkerType.ArrowClosed, color: "#9a9a9a", width: 18, height: 18 },
+    markerEnd: { type: MarkerType.ArrowClosed, color: theme.textMuted, width: 18, height: 18 },
   };
 }
 

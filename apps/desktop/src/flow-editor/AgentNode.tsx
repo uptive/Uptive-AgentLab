@@ -1,10 +1,10 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { colors } from "../theme.js";
+import { theme, withAlpha } from "../theme.js";
 import type { AgentFlowNode } from "./graphMapping.js";
 import { DANGER, DEMO_COLORS, useEditorContext } from "./EditorContext.js";
 import type { DemoNodeFrame } from "./useDemoRun.js";
 
-const handleStyle = { width: 12, height: 12, background: colors.accent, border: `2px solid ${colors.bgBlack}` };
+const handleStyle = { width: 12, height: 12, background: theme.primary, border: `2px solid ${theme.pageBg}` };
 
 export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
   const { agentsById, incoming, invalidNodeIds, demo } = useEditorContext();
@@ -17,8 +17,8 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
     : invalidNodeIds.has(id)
       ? DANGER
       : selected
-        ? colors.accent
-        : colors.bgCard;
+        ? theme.primary
+        : theme.border;
 
   return (
     <div
@@ -26,16 +26,16 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
         width: 200,
         padding: "10px 12px",
         borderRadius: 10,
-        background: colors.bgGrey,
+        background: theme.surface,
         border: `2px ${demoNode?.state === "waiting" ? "dashed" : "solid"} ${borderColor}`,
         boxShadow:
           demoNode?.state === "running"
-            ? `0 0 14px ${DEMO_COLORS.running}88`
+            ? `0 0 14px ${withAlpha(DEMO_COLORS.running, 53)}`
             : selected
-              ? `0 0 0 3px ${colors.accent}40`
-              : "0 2px 6px #0006",
+              ? `0 0 0 3px ${withAlpha(theme.primary, 25)}`
+              : theme.cardShadow,
         opacity: demoNode?.state === "idle" ? 0.55 : 1,
-        color: colors.secondary,
+        color: theme.text,
         fontSize: 12,
         position: "relative",
         overflow: "hidden",
@@ -86,7 +86,7 @@ function DemoBadge({ frame }: { frame: DemoNodeFrame }) {
         fontWeight: 600,
         textTransform: "uppercase",
         background: DEMO_COLORS[frame.state],
-        color: colors.bgBlack,
+        color: theme.onPrimary,
         flexShrink: 0,
       }}
     >
