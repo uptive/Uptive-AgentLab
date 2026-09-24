@@ -45,7 +45,7 @@ describe("analyzeRun on the PR-review fixture", () => {
     expect(summary.projected.costUsd).toBeCloseTo(summary.baseline.costUsd - saved, 6);
     expect(summary.byCategory["model-selection"].usdPerRun).toBeCloseTo(-planStep.usage!.estimatedCostUsd * 0.7, 6);
     expect(summary.byCategory.quality).toMatchObject({ count: 3, highestSeverity: "high" });
-    expect(summary.byCategory["flow-design"].count).toBe(0);
+    expect(summary.byCategory["flow-design"].count).toBe(1);
     expect(summary.projected.latencyMs).toBeLessThan(summary.baseline.latencyMs - 11_100);
     expect(summary.topRecommendationIds).toEqual(recommendations.slice(0, 3).map((r) => r.id));
     expect(summary.topRecommendationIds[0]).toBe("quality:broken-handoff:validate:securityFindings");

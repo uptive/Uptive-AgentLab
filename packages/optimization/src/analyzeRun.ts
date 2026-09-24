@@ -7,20 +7,14 @@ import type {
   RecommendationSeverity,
   SkippedEvaluator,
 } from "@agentlab/contracts";
-import { createFlowDesignEvaluator } from "./evaluators/flowDesign.js";
+import { flowDesignEvaluator } from "./evaluators/flowDesign.js";
 import { modelSelectionEvaluator } from "./evaluators/modelSelection.js";
 import { qualityEvaluator } from "./evaluators/quality.js";
 import { tokenContextEvaluator } from "./evaluators/tokenContext.js";
 import { criticalPathMs, totalRunCostUsd } from "./helpers.js";
-import type { EvaluationInput, Evaluator, ModelClient } from "./types.js";
+import type { EvaluationInput, Evaluator } from "./types.js";
 
-/** Rule-based evaluators that need no model access. */
-export const defaultEvaluators: Evaluator[] = [qualityEvaluator, modelSelectionEvaluator, tokenContextEvaluator];
-
-/** Every evaluator, including the model-backed ones. */
-export function createEvaluators(client: ModelClient): Evaluator[] {
-  return [...defaultEvaluators, createFlowDesignEvaluator(client)];
-}
+export const defaultEvaluators: Evaluator[] = [qualityEvaluator, modelSelectionEvaluator, tokenContextEvaluator, flowDesignEvaluator];
 
 export const CATEGORIES: RecommendationCategory[] = ["quality", "model-selection", "token-context", "flow-design"];
 

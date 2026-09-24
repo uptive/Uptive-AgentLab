@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeType, EvaluationResult, Recommendation, RecommendationCategory, RecommendationChange } from "@agentlab/contracts";
-import { CATEGORIES, analyzeRun, createEvaluators, getModel, type EvaluationInput } from "@agentlab/optimization";
-import { modelClient } from "../optimize/modelClient.js";
+import { CATEGORIES, analyzeRun, getModel, type EvaluationInput } from "@agentlab/optimization";
 import { runSource, type RunSummary } from "../optimize/runSource.js";
 import { colors } from "../theme.js";
 
@@ -35,8 +34,6 @@ const cardStyle = { background: colors.bgGrey, borderRadius: 8, padding: 16 } as
 const mutedText = { color: "#B8B8B8", fontSize: 13 } as const;
 const sectionTitle = { fontSize: 13, textTransform: "uppercase", letterSpacing: 0.6, color: "#B8B8B8", margin: "28px 0 10px" } as const;
 
-const evaluators = createEvaluators(modelClient);
-
 export function OptimizeView() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>("");
@@ -64,7 +61,7 @@ export function OptimizeView() {
     try {
       const loaded = await runSource.loadRun(selectedRunId);
       if (!loaded) throw new Error(`Run ${selectedRunId} not found`);
-      const evaluation = await analyzeRun(loaded, evaluators);
+      const evaluation = await analyzeRun(loaded);
       setInput(loaded);
       setResult(evaluation);
       setExpanded(new Set(evaluation.recommendations.filter((r) => r.severity === "high").map((r) => r.id)));
@@ -133,7 +130,6 @@ export function OptimizeView() {
         >
           {analyzing ? "Analyzing…" : "Analyze Run"}
         </button>
-        {analyzing ? <span style={mutedText}>Flow Design asks Claude; this can take up to a minute.</span> : null}
       </div>
 
       {error ? <p style={{ color: SEVERITY_COLORS.high }}>{error}</p> : null}
@@ -271,7 +267,7 @@ function CategoryTiles({
         const issues = `${summary.count} issue${summary.count === 1 ? "" : "s"}`;
         const value = skipped ? "Skipped" : summary.count === 0 ? "–" : (gains[0] ?? issues);
         const detail = skipped
-          ? "Needs Claude API access"
+          ? "Could not run"
           : summary.count === 0
             ? "No issues found"
             : [...gains.slice(1), gains.length ? issues : undefined, summary.highestSeverity ? `highest: ${summary.highestSeverity}` : undefined]

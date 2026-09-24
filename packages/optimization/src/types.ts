@@ -30,9 +30,9 @@ export interface JsonRequest {
 }
 
 /**
- * The only thing LLM-backed evaluators need from a model. Implemented by the Anthropic SDK in
- * Node/Electron main (`@agentlab/optimization/anthropic`), by an IPC bridge in the renderer, and by
- * mocks in tests. Swap for Group 1's AgentRuntime once it can run evaluator agents.
+ * What LLM-backed evaluators will need from a model. Not used yet: all evaluators are rule-based for
+ * now. Implemented by the Anthropic SDK in Node/Electron main (`@agentlab/optimization/anthropic`)
+ * and by the IPC bridge in the renderer (`apps/desktop/src/optimize/modelClient.ts`).
  */
 export interface ModelClient {
   generateJson(request: JsonRequest): Promise<unknown>;
