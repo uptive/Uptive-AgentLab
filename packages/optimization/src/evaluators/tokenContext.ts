@@ -1,4 +1,4 @@
-import type { EstimatedImpact, Recommendation, StepRun } from "@agentlab/contracts";
+import type { EstimatedImpact, Recommendation, RecommendationTag, StepRun } from "@agentlab/contracts";
 import { estimateCostUsd, getModel } from "../modelCatalog.js";
 import {
   INPUT_MS_PER_1K_TOKENS,
@@ -60,6 +60,7 @@ function redundantFanInContext(input: EvaluationInput): Recommendation[] {
         evaluatorId: EVALUATOR_ID,
         title: `Drop \`${field}\` from ${agent.name}`,
         category: "token-context",
+        tags: ["Context", "Input", "Duplication", ...impact.tags],
         severity: "medium",
         target: { kind: "node", nodeId: node.id, agentId: agent.id },
         problem: `${agent.name} receives the full \`${field}\` (~${Math.round(share * 100)}% of its input) even though ${upstreamNames.join(" and ")} already reviewed it and hand over their findings.`,
@@ -95,6 +96,7 @@ function oversizedPlanningInput(input: EvaluationInput): Recommendation[] {
       evaluatorId: EVALUATOR_ID,
       title: `Summarize ${agent.name}'s \`${dominant.field}\` input`,
       category: "token-context",
+      tags: ["Context", "Input", ...impact.tags],
       severity: "medium",
       target: { kind: "node", nodeId: step.nodeId, agentId: agent.id },
       problem: `${agent.name} gets the full \`${dominant.field}\` (~${Math.round(dominant.share * 100)}% of its input) but only produces a short plan: input is ${Math.round(1 / ratio)}× its output.`,
@@ -118,7 +120,7 @@ function contextImpact(
   step: StepRun,
   modelId: string,
   removedShare: number,
-): { estimatedImpact: EstimatedImpact } {
+): { estimatedImpact: EstimatedImpact; tags: RecommendationTag[] } {
   const usage = step.usage!;
   const tokensSaved = Math.round(usage.inputTokens * removedShare);
   const model = getModel(modelId);
@@ -130,6 +132,7 @@ function contextImpact(
   const hasSpeed = -speed.latencyMs >= MIN_SPEED_GAIN_MS;
 
   return {
+    tags: [...(costPercent > 0 ? (["Cost"] as const) : []), ...(hasSpeed ? (["Speed"] as const) : [])],
     estimatedImpact: {
       cost: { usdPerRun: -stepCost * (costPercent / 100), percent: -costPercent, inputTokensPerRun: -tokensSaved },
       ...(hasSpeed ? { speed } : {}),

@@ -44,6 +44,16 @@ export interface Run {
 
 export type AuthSource = "subscription" | "api-key" | "unknown";
 
+/**
+ * Live output of a running step, streamed token by token. Not persisted: the finished content ends
+ * up in the step's model_call and tool_call trace events.
+ */
+export type AgentStreamChunk = { runId: string; stepRunId: string } & (
+  | { type: "block"; block: "thinking" | "text" | "tool_use"; toolName?: string; toolUseId?: string }
+  | { type: "delta"; text: string }
+  | { type: "usage"; inputTokens: number; outputTokens: number }
+);
+
 export type TraceEventType =
   | "agent_start"
   | "agent_end"

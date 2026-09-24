@@ -4,6 +4,7 @@ import type {
   AgentDefinition,
   AgentInput,
   AgentRuntime,
+  AgentStreamChunk,
   FlowDefinition,
   FlowStore,
   McpServerDefinition,
@@ -264,6 +265,8 @@ export interface AgentLabApi {
     /** Subscribes to run snapshots; returns an unsubscribe function. */
     onUpdate(listener: (run: Run) => void): () => void;
     onEvent(listener: (event: TraceEvent) => void): () => void;
+    /** Live token output of running steps, in batches. Not persisted. */
+    onStream(listener: (chunks: AgentStreamChunk[]) => void): () => void;
     /** Opens a folder picker; undefined when cancelled. */
     pickFolder(): Promise<string | undefined>;
   };
@@ -315,6 +318,7 @@ export const IPC = {
   cancelRun: "runs:cancel",
   runUpdate: "runs:update",
   runEvent: "runs:event",
+  runStream: "runs:stream",
   pickFolder: "runs:pick-folder",
   authStatus: "claude:auth-status",
   builtinAgents: "claude:builtin-agents",

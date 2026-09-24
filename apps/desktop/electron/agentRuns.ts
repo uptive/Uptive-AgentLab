@@ -3,8 +3,9 @@ import { createRequire } from "node:module";
 import { cp, readdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentDefinition, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
+import type { AgentDefinition, AgentStreamChunk, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
 import { demoAgents } from "@agentlab/agent-runtime";
+import type { AsyncTelemetryStore } from "@agentlab/observability";
 import { createClaudeAgentRuntime, createClaudeCodeJsonClient, getClaudeAuthStatus, testMcpServer, type ClaudeAuthStatus } from "@agentlab/agent-runtime/claude";
 import { createMcpServerFileStore, createSkillFileStore, parseSkillFile } from "@agentlab/agent-runtime/library";
 import { createFlowEngine, dummyAgents } from "@agentlab/flow-engine";
@@ -14,6 +15,28 @@ import { SecretStore } from "./secrets.js";
 // Runs flows for real with the Claude runtime, and manages the skill and MCP libraries.
 
 const WORKSPACE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Token deltas arrive dozens per second; they are sent to the renderer in batches this often. */
+const STREAM_FLUSH_MS = 80;
+
+/** Buffers stream chunks and merges consecutive deltas of the same step before sending. */
+function createStreamBatcher(send: (chunks: AgentStreamChunk[]) => void) {
+  let buffer: AgentStreamChunk[] = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    timer = undefined;
+    if (buffer.length) send(buffer);
+    buffer = [];
+  };
+  return {
+    push(chunk: AgentStreamChunk) {
+      const last = buffer[buffer.length - 1];
+      if (chunk.type === "delta" && last?.type === "delta" && last.stepRunId === chunk.stepRunId) last.text += chunk.text;
+      else buffer.push({ ...chunk });
+      timer ??= setTimeout(flush, STREAM_FLUSH_MS);
+    },
+    flush,
+  };
+}
 
 /**
  * The Claude Code binary the Agent SDK drives. Packaged apps ship it under resources/claude
@@ -36,6 +59,8 @@ export function claudeBinaryPath(): string | undefined {
 export interface AgentRunsDeps {
   /** A saved agent (local folder or MongoDB); may reject when the database is unreachable. */
   getAgent: (id: string) => Promise<AgentDefinition | undefined>;
+  /** Where runs are saved; the main process persists them itself, whether or not a view is open. */
+  telemetry: AsyncTelemetryStore;
   /** Folder for committed library data (skills/, mcp-servers/). */
   dataDir: string;
 }
@@ -88,7 +113,17 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
     const controller = new AbortController();
     let authSource: AuthSource | undefined;
     const snapshot = { flow, agents: [...agents.values()], input };
-    const sendEvent = (event: TraceEvent) => broadcast(IPC.runEvent, event);
+    const batcher = createStreamBatcher((chunks) => broadcast(IPC.runStream, chunks));
+    // Stream chunks go first so the live view never lags behind the trace events.
+    const sendEvent = (event: TraceEvent) => {
+      batcher.flush();
+      broadcast(IPC.runEvent, event);
+      void deps.telemetry.recordEvent(event).catch((e) => console.warn("[runs] could not save event:", e.message));
+    };
+    const sendRun = (run: Run) => {
+      broadcast(IPC.runUpdate, run);
+      void deps.telemetry.saveRun(run).catch((e) => console.warn("[runs] could not save run:", e.message));
+    };
     const runtime = createClaudeAgentRuntime({
       skillsDir: skills.dir,
       workspaceRoot,
@@ -96,6 +131,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
       resolveSecret: (ref) => secrets.get(ref),
       additionalDirectories: folder ? [folder] : [],
       onEvent: sendEvent,
+      onStream: (chunk) => batcher.push(chunk),
       onAuth: (source) => (authSource ??= source),
       signal: controller.signal,
       pathToClaudeCodeExecutable,
@@ -113,7 +149,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
               active.set(runId, controller);
               resolve({ runId });
             }
-            broadcast(IPC.runUpdate, { ...run, ...snapshot, ...(authSource ? { authSource } : {}) });
+            sendRun({ ...run, ...snapshot, ...(authSource ? { authSource } : {}) });
           },
         })
         .then((run) => {
@@ -121,7 +157,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
           const steps = controller.signal.aborted
             ? run.steps.map((step) => (step.status === "pending" ? { ...step, status: "failed" as const, error: "Cancelled by user" } : step))
             : run.steps;
-          broadcast(IPC.runUpdate, { ...run, steps, ...snapshot, authSource: authSource ?? "unknown" });
+          sendRun({ ...run, steps, ...snapshot, authSource: authSource ?? "unknown" });
         })
         .catch((error) => (runId ? console.error("[runs] run crashed:", error) : reject(error)))
         .finally(() => runId && active.delete(runId));

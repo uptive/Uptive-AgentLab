@@ -6,6 +6,9 @@ import { builtinToolName, mcpServerKey } from "../tools.js";
 
 export const DEFAULT_MAX_TURNS = 25;
 
+/** Name of the local plugin that carries an agent's skills into its step workspace. */
+export const SKILLS_PLUGIN = "agentlab-skills";
+
 /** Name of the in-process MCP server that hosts the app's function tools. */
 export const FUNCTION_SERVER = "agentlab";
 
@@ -103,11 +106,18 @@ export function childEnv(base: Record<string, string | undefined>): Record<strin
   return env;
 }
 
+/** Adaptive thinking exists on Claude 4.6 and later; Haiku 4.5 and older models reject it. */
+export function supportsAdaptiveThinking(model: string): boolean {
+  return !/haiku-4-5|-3-|claude-3|4-5-\d{8}|sonnet-4-5|opus-4-5|opus-4-1|opus-4-0|sonnet-4-0/.test(model);
+}
+
 export interface BaseOptionsInput {
   agent: AgentDefinition;
   tools: ResolvedTools;
   mcpServers: Record<string, McpServerConfig>;
   cwd: string;
+  /** Folder of the step's skills plugin (see prepareWorkspace), when the agent has skills. */
+  skillsPlugin?: string;
   additionalDirectories: string[];
   env: Record<string, string>;
   abortController: AbortController;
@@ -132,10 +142,12 @@ export function buildBaseOptions(input: BaseOptionsInput): Options {
     permissionMode: "dontAsk",
     mcpServers: input.mcpServers,
     strictMcpConfig: true,
-    // Isolation: no user settings, CLAUDE.md or personal skills leak in. "project" loads only the
-    // step workspace's .claude/ folder, which holds this agent's skills.
-    settingSources: ["project"],
-    skills: agent.skills ?? [],
+    // Isolation: no filesystem settings at all. "project" is not safe either: it walks up parent
+    // folders, and a workspace under the home folder then picks up ~/.claude/CLAUDE.md. The agent's
+    // skills come from a local plugin in the step workspace instead.
+    settingSources: [],
+    ...(input.skillsPlugin ? { plugins: [{ type: "local" as const, path: input.skillsPlugin, skipMcpDiscovery: true }] } : {}),
+    skills: (agent.skills ?? []).map((name) => `${SKILLS_PLUGIN}:${name}`),
     persistSession: false,
     cwd: input.cwd,
     additionalDirectories: input.additionalDirectories,
@@ -143,6 +155,9 @@ export function buildBaseOptions(input: BaseOptionsInput): Options {
     abortController: input.abortController,
     maxTurns,
     ...(effort ? { effort } : {}),
+    // Token-level streaming for the live view, with readable thinking summaries where supported.
+    includePartialMessages: true,
+    ...(supportsAdaptiveThinking(agent.model) ? { thinking: { type: "adaptive", display: "summarized" } } : {}),
     ...(agent.limits?.maxCostUsd ? { maxBudgetUsd: agent.limits.maxCostUsd } : {}),
     ...(agent.outputSchema && typeof agent.outputSchema === "object"
       ? { outputFormat: { type: "json_schema", schema: agent.outputSchema as Record<string, unknown> } }

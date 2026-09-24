@@ -7,10 +7,12 @@ import {
   type McpServerConfig,
   type SDKAssistantMessage,
   type SDKMessage,
+  type SDKPartialAssistantMessage,
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
   AgentDefinition,
+  AgentStreamChunk,
   AgentResult,
   AgentRunContext,
   AgentRuntime,
@@ -30,6 +32,7 @@ import {
   FUNCTION_SERVER,
   friendlyError,
   parseTextOutput,
+  SKILLS_PLUGIN,
   resolveTools,
   toMcpConfig,
 } from "./options.js";
@@ -47,6 +50,8 @@ export interface ClaudeRuntimeConfig {
   /** Extra folders agents may read, e.g. the repository a review flow looks at. */
   additionalDirectories?: string[];
   onEvent?: (event: TraceEvent) => void;
+  /** Live token stream (thinking, text, tool input) and running token counts, for the live view. */
+  onStream?: (chunk: AgentStreamChunk) => void;
   /** Called once per step with what is paying for it. */
   onAuth?: (source: AuthSource) => void;
   /** Aborts every running step. */
@@ -59,6 +64,8 @@ export interface ClaudeRuntimeConfig {
   now?: () => Date;
 }
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
 const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, latencyMs: 0 };
 const MAX_TRACE_CHARS = 20_000;
 
@@ -69,9 +76,14 @@ function bounded(value: unknown): unknown {
   return `${text.slice(0, MAX_TRACE_CHARS)}… [truncated ${text.length - MAX_TRACE_CHARS} characters]`;
 }
 
-async function prepareWorkspace(dir: string, skillsDir: string, skills: string[]): Promise<string[]> {
+/**
+ * Creates the step workspace and, when the agent has skills, a local plugin in it that holds copies
+ * of exactly those skills. Returns the plugin folder and any skills that were not found.
+ */
+async function prepareWorkspace(dir: string, skillsDir: string, skills: string[]): Promise<{ plugin?: string; missing: string[] }> {
   await fs.mkdir(dir, { recursive: true });
   const missing: string[] = [];
+  const plugin = path.join(dir, ".agentlab-skills");
   for (const name of skills) {
     const source = path.join(skillsDir, name);
     try {
@@ -81,9 +93,15 @@ async function prepareWorkspace(dir: string, skillsDir: string, skills: string[]
       continue;
     }
     // Copied rather than symlinked: symlinks need admin rights on Windows.
-    await fs.cp(source, path.join(dir, ".claude", "skills", name), { recursive: true });
+    await fs.cp(source, path.join(plugin, "skills", name), { recursive: true });
   }
-  return missing;
+  if (skills.length === missing.length) return { missing };
+  await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
+  await fs.writeFile(
+    path.join(plugin, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: SKILLS_PLUGIN, version: "1.0.0", description: "Skills granted to this agent by AgentLab" }),
+  );
+  return { plugin, missing };
 }
 
 interface PendingModelCall {
@@ -91,6 +109,7 @@ interface PendingModelCall {
   model: string;
   usage: SDKAssistantMessage["message"]["usage"];
   stopReason: string | null;
+  thinking: string[];
   text: string[];
   toolUses: string[];
 }
@@ -102,6 +121,8 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
 
   return {
     async run(agent: AgentDefinition, input: unknown, context: AgentRunContext): Promise<AgentResult> {
+      const stream = (chunk: DistributiveOmit<AgentStreamChunk, "runId" | "stepRunId">) =>
+        config.onStream?.({ ...chunk, runId: context.runId, stepRunId: context.stepRunId } as AgentStreamChunk);
       const emit = (type: TraceEventType, data: unknown) =>
         config.onEvent?.({ id: randomUUID(), runId: context.runId, stepRunId: context.stepRunId, type, timestamp: now().toISOString(), data });
 
@@ -138,8 +159,8 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
 
       if (config.signal?.aborted) return fail("Run was cancelled");
       const cwd = path.join(config.workspaceRoot, context.runId, context.stepRunId);
-      const missingSkills = await prepareWorkspace(cwd, config.skillsDir, agent.skills ?? []);
-      if (missingSkills.length > 0) return fail(`Skills not found: ${missingSkills.join(", ")}.`);
+      const workspace = await prepareWorkspace(cwd, config.skillsDir, agent.skills ?? []);
+      if (workspace.missing.length > 0) return fail(`Skills not found: ${workspace.missing.join(", ")}.`);
 
       const abortController = new AbortController();
       const onAbort = () => abortController.abort();
@@ -179,6 +200,7 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
           tools,
           mcpServers,
           cwd,
+          skillsPlugin: workspace.plugin,
           additionalDirectories: config.additionalDirectories ?? [],
           env: childEnv(config.env ?? process.env),
           abortController,
@@ -212,10 +234,12 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
           outputTokens: u.output_tokens ?? 0,
           cacheReadTokens: u.cache_read_input_tokens ?? 0,
           stopReason: pending.stopReason,
+          thinking: pending.thinking.length ? bounded(pending.thinking.join("\n")) : undefined,
           text: bounded(pending.text.join("\n")),
           toolUses: pending.toolUses,
         });
         pending = undefined;
+        stream({ type: "usage", inputTokens: streamedInput, outputTokens: streamedOutput });
         const maxTokens = agent.limits?.maxTokens;
         if (maxTokens && streamedInput + streamedOutput > maxTokens && !tokenLimitHit) {
           tokenLimitHit = true;
@@ -226,12 +250,29 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
         if (m.parent_tool_use_id) return; // subagent traffic; agents are not given the Agent tool
         if (m.error) lastError = m.error;
         if (pending && pending.id !== m.message.id) flush();
-        pending ??= { id: m.message.id, model: m.message.model, usage: m.message.usage, stopReason: null, text: [], toolUses: [] };
+        pending ??= { id: m.message.id, model: m.message.model, usage: m.message.usage, stopReason: null, thinking: [], text: [], toolUses: [] };
         pending.usage = m.message.usage;
         pending.stopReason = m.message.stop_reason ?? pending.stopReason;
         for (const block of m.message.content) {
-          if (block.type === "text") pending.text.push(block.text);
+          if (block.type === "thinking" && block.thinking) pending.thinking.push(block.thinking);
+          else if (block.type === "text") pending.text.push(block.text);
           else if (block.type === "tool_use") pending.toolUses.push(block.name);
+        }
+      };
+
+      // Partial messages: forward block starts and deltas so the UI can show the agent working.
+      const onStreamEvent = (event: SDKPartialAssistantMessage["event"]) => {
+        if (event.type === "content_block_start") {
+          const block = event.content_block;
+          if (block.type === "thinking" || block.type === "text") stream({ type: "block", block: block.type });
+          else if (block.type === "tool_use" || block.type === "mcp_tool_use" || block.type === "server_tool_use") {
+            stream({ type: "block", block: "tool_use", toolName: block.name, toolUseId: block.id });
+          }
+        } else if (event.type === "content_block_delta") {
+          const delta = event.delta;
+          if (delta.type === "thinking_delta") stream({ type: "delta", text: delta.thinking });
+          else if (delta.type === "text_delta") stream({ type: "delta", text: delta.text });
+          else if (delta.type === "input_json_delta") stream({ type: "delta", text: delta.partial_json });
         }
       };
 
@@ -240,6 +281,7 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
         for await (const message of query({ prompt: buildPrompt(input), options }) as AsyncIterable<SDKMessage>) {
           if (message.type === "system" && message.subtype === "init") config.onAuth?.(authSourceOf(message.apiKeySource));
           else if (message.type === "assistant") onAssistant(message);
+          else if (message.type === "stream_event" && !message.parent_tool_use_id) onStreamEvent(message.event);
           else if (message.type === "result") result = message;
         }
       } catch (error) {
