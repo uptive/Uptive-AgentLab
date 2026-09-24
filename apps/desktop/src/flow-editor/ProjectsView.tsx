@@ -5,7 +5,7 @@ import { alpha, theme } from "../theme.js";
 import { bridge, errorMessage } from "./bridge.js";
 import { STATUS_COLORS } from "./EditorContext.js";
 import { slugify } from "./graphMapping.js";
-import { buttonBase, inputStyle, primaryButton } from "./styles.js";
+import { buttonBase, headerButtonSize, inputStyle, primaryButton } from "./styles.js";
 import { TagChip } from "./TagInput.js";
 
 interface Props {
@@ -24,14 +24,19 @@ export function ProjectsView({ onOpenLocal, onOpenCloud }: Props) {
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState<string>();
+  const [loading, setLoading] = useState(false);
 
+  // Re-reads the local flow files and queries MongoDB again, so cloud flows saved elsewhere show up.
   const refresh = useCallback(async () => {
+    setLoading(true);
     try {
       const [projects, flows] = await Promise.all([bridge().projects.list(), bridge().cloudFlows.list()]);
       setState(projects);
       setCloudFlows(flows);
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -115,11 +120,22 @@ export function ProjectsView({ onOpenLocal, onOpenCloud }: Props) {
     <div style={{ padding: 24, height: "100%", boxSizing: "border-box", overflowY: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <h1 style={{ margin: 0, marginRight: "auto" }}>Projects</h1>
-        <button style={buttonBase} onClick={add}>
+        <button
+          style={{ ...buttonBase, ...headerButtonSize, opacity: loading ? 0.6 : 1 }}
+          onClick={() => {
+            setError(undefined);
+            void refresh();
+          }}
+          disabled={loading}
+          title="Reload cloud flows from MongoDB and re-read local flow files"
+        >
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+        <button style={{ ...buttonBase, ...headerButtonSize }} onClick={add}>
           Add existing…
         </button>
         <button
-          style={primaryButton}
+          style={{ ...primaryButton, ...headerButtonSize }}
           onClick={() => {
             setTarget("local");
             setCreating(true);
