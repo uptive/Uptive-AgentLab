@@ -1,0 +1,54 @@
+{
+  "id": "sample-research-agent",
+  "name": "Research Assistant",
+  "description": "Researches a topic and returns a short, sourced summary.",
+  "role": "researcher",
+  "systemInstructions": "You are a careful research assistant. Search for relevant, recent sources on the given topic, then write a concise summary. Cite every claim with a source URL. If sources disagree, say so.",
+  "model": "claude-sonnet-5",
+  "modelSettings": {
+    "temperature": 0.3,
+    "maxTokens": 2048
+  },
+  "tools": [
+    {
+      "id": "web-search",
+      "name": "Web Search",
+      "kind": "mcp"
+    },
+    {
+      "id": "fetch-url",
+      "name": "Fetch URL",
+      "kind": "function"
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "topic": { "type": "string", "description": "The topic to research." },
+      "maxSources": { "type": "integer", "minimum": 1, "default": 5 }
+    },
+    "required": ["topic"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "summary": { "type": "string" },
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "url": { "type": "string", "format": "uri" }
+          },
+          "required": ["title", "url"]
+        }
+      }
+    },
+    "required": ["summary", "sources"]
+  },
+  "limits": {
+    "maxTokens": 50000,
+    "maxCostUsd": 0.5
+  }
+}
