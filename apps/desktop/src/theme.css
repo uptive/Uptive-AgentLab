@@ -37,6 +37,9 @@
   --color-nav-active-bg: #e6f2fa;
   --color-nav-active-text: #001c71;
   --color-code-bg: #f7f8fa;
+  --color-surface-selected: #e6f2fa;
+  --color-warning: #b7791f;
+  --color-danger: #c8313a;
   --color-error-bg: #fbe4e5;
   --color-error-text: #8e191f;
   --shadow-card: 0 1px 3px rgba(0, 28, 113, 0.08), 0 1px 2px rgba(0, 28, 113, 0.06);
@@ -60,6 +63,9 @@
   --color-nav-active-bg: #6eeba1;
   --color-nav-active-text: #202123;
   --color-code-bg: #202123;
+  --color-surface-selected: #3a3c40;
+  --color-warning: #d69a2d;
+  --color-danger: #f26d6d;
   --color-error-bg: #4a1f22;
   --color-error-text: #f4b5b8;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
