@@ -2,6 +2,7 @@
 
 import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
+import type { JsonRequest } from "@agentlab/optimization";
 
 /** A flow file registered in the editor configuration. */
 export interface ProjectEntry {
@@ -46,6 +47,10 @@ export interface AgentLabApi {
     load(): Promise<PersistedState | null>;
     save(state: PersistedState): Promise<void>;
   };
+  /** Model calls for LLM-backed evaluators; run in the main process so API credentials stay there. */
+  optimization: {
+    generateJson(request: JsonRequest): Promise<unknown>;
+  };
 }
 
 export const IPC = {
@@ -56,4 +61,5 @@ export const IPC = {
   revealProject: "projects:reveal",
   readFlow: "flows:read",
   writeFlow: "flows:write",
+  generateJson: "optimization:generate-json",
 } as const;
