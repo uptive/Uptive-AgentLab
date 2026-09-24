@@ -75,4 +75,19 @@ describe("analyzeRun on the PR-review fixture", () => {
       expect(r.target.kind === "node" && nodeIds.has(r.target.nodeId)).toBe(true);
     }
   });
+
+  it("tags recommendations across categories without changing the category", async () => {
+    const { recommendations } = await analyzeRun(codeReviewFixture);
+    const byId = (id: string) => recommendations.find((r) => r.id === id)!;
+
+    expect(byId("model-selection:overpowered:plan")).toMatchObject({ category: "model-selection", tags: ["Cost", "Speed"] });
+    expect(byId("flow-design:parallelization:security-review")).toMatchObject({ category: "flow-design", tags: ["Speed"] });
+    expect(byId("token-context:oversized-planning-input:plan:diff")).toMatchObject({ category: "token-context", tags: ["Context", "Input", "Cost", "Speed"] });
+
+    // The same tag shows up under different categories.
+    const categoriesWith = (tag: string) => new Set(recommendations.filter((r) => r.tags?.includes(tag as never)).map((r) => r.category));
+    expect(categoriesWith("Cost")).toEqual(new Set(["model-selection", "token-context"]));
+    expect([...categoriesWith("Speed")]).toEqual(expect.arrayContaining(["model-selection", "flow-design"]));
+    for (const r of recommendations) expect(r.tags?.length).toBeGreaterThan(0);
+  });
 });

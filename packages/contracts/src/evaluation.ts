@@ -3,6 +3,26 @@ export type RecommendationCategory = "quality" | "model-selection" | "token-cont
 
 export type RecommendationSeverity = "high" | "medium" | "low";
 
+/**
+ * Secondary, cross-cutting labels for what a recommendation affects, independent of the category
+ * (evaluator) that found it. Fixed set: evaluators must not invent new ones.
+ */
+export const RECOMMENDATION_TAGS = [
+  "Input",
+  "Output",
+  "Instructions",
+  "Error",
+  "Cost",
+  "Context",
+  "Speed",
+  "Duplication",
+  "Responsibility",
+  "Handoff",
+  "Validation",
+] as const;
+
+export type RecommendationTag = (typeof RECOMMENDATION_TAGS)[number];
+
 /** What a recommendation points at. Prefer the most specific kind available. */
 export type RecommendationTarget =
   | { kind: "node"; nodeId: string; agentId: string }
@@ -62,6 +82,8 @@ export interface Recommendation {
   /** Id of the evaluator that produced this recommendation. */
   evaluatorId: string;
   category: RecommendationCategory;
+  /** What the recommendation affects, across categories (e.g. "Cost" on both a model and a context finding). May be empty. */
+  tags?: RecommendationTag[];
   /** Short action-oriented headline, e.g. "Planner → smaller model". */
   title: string;
   severity: RecommendationSeverity;

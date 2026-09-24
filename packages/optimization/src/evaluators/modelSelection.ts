@@ -1,4 +1,4 @@
-import type { EstimatedImpact, Recommendation, StepRun } from "@agentlab/contracts";
+import type { EstimatedImpact, Recommendation, RecommendationTag, StepRun } from "@agentlab/contracts";
 import { cheapestModelInTier, estimateCostUsd, getModel, type ModelInfo } from "../modelCatalog.js";
 import {
   agentFor,
@@ -28,6 +28,8 @@ export const modelSelectionEvaluator: Evaluator = {
 export interface ModelChange {
   direction: "overpowered" | "underpowered";
   estimatedImpact: EstimatedImpact;
+  /** Dimensions the change measurably affects. */
+  tags: RecommendationTag[];
   evidence: string[];
   /** Share of the run's cost this change saves (negative when it costs more). */
   runCostShare: number;
@@ -50,6 +52,8 @@ export function modelChangeImpact(input: EvaluationInput, step: StepRun, current
     return {
       direction: "overpowered",
       runCostShare: -usdPerRun / runCost,
+      // A smaller model also answers faster.
+      tags: reduction > 0 ? ["Cost", "Speed"] : ["Speed"],
       estimatedImpact: {
         ...(reduction > 0 ? { cost: { usdPerRun, percent: -reduction } } : {}),
         summary: reduction > 0 ? `Estimated cost reduction: ${reduction}%` : "About the same cost",
@@ -78,6 +82,11 @@ export function modelChangeImpact(input: EvaluationInput, step: StepRun, current
   return {
     direction: "underpowered",
     runCostShare: (currentCost - alternativeCost) / runCost,
+    tags: [
+      ...(retriesAvoided > 0 ? (["Error"] as const) : []),
+      ...(speed ? (["Speed"] as const) : []),
+      ...(costChanges ? (["Cost"] as const) : []),
+    ],
     estimatedImpact: {
       ...(costChanges ? { cost: { usdPerRun: alternativeCost - currentCost, percent: costPercent } } : {}),
       ...(speed ? { speed } : {}),
@@ -114,6 +123,7 @@ function overpoweredModels(input: EvaluationInput): Recommendation[] {
       id: `${EVALUATOR_ID}:overpowered:${step.nodeId}`,
       evaluatorId: EVALUATOR_ID,
       category: "model-selection",
+      tags: change.tags,
       title: `${agent.name} → smaller model`,
       severity: change.runCostShare > 0.15 ? "high" : "medium",
       target: { kind: "node", nodeId: step.nodeId, agentId: agent.id },
@@ -145,6 +155,7 @@ function underpoweredModels(input: EvaluationInput): Recommendation[] {
       id: `${EVALUATOR_ID}:underpowered:${step.nodeId}`,
       evaluatorId: EVALUATOR_ID,
       category: "model-selection",
+      tags: change.tags,
       title: `${agent.name} → stronger model`,
       severity: "medium",
       target: { kind: "node", nodeId: step.nodeId, agentId: agent.id },
