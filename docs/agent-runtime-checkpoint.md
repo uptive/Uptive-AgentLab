@@ -23,6 +23,15 @@ Branch `feature/agent-sdk-runtime`. Agents run for real with the Claude Agent SD
 - **Optimize evaluators** use the API when `ANTHROPIC_API_KEY` is set, and otherwise go through Claude Code (subscription).
 - **Contracts**: `ToolRef.kind` is `builtin | mcp | function` (with `serverId` / `toolName`); `AgentDefinition.skills`; `McpServerDefinition`, `SkillDefinition` and their stores. `MODEL_CATALOG` moved to `@agentlab/contracts`.
 
+## Merged with main (2026-09-24)
+
+Main's changes that affected this branch, and how they were adapted:
+
+- **Agents live in two stores** (git-ignored `data/local-agents/` and MongoDB). Runs look agents up the same way (local first, then MongoDB), falling back to the built-in demo agents. The UI-only `source` tag is kept out of run snapshots.
+- **AI agent draft** (`agents:draft`). It now proposes an `effort` and tools from the real tool list (built-in and function tools), not temperature, max tokens or free-text tool names. It uses the Claude Code binary bundled with the Agent SDK when `CLAUDE_BIN` is not set.
+- **Cloud flows** (MongoDB) are listed in the Runs dialog next to flow files.
+- Demo agents use main's `role` + `description` split, with Claude models.
+
 ## How to run and test
 
 ```bash

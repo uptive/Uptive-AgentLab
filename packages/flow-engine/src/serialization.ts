@@ -36,7 +36,11 @@ export function parseFlow(json: string): FlowDefinition {
   } catch (err) {
     throw new FlowParseError(`Invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
+  return parseFlowShape(raw);
+}
 
+/** Structurally checks an already-deserialized value (e.g. an IPC payload, not JSON text). */
+export function parseFlowShape(raw: unknown): FlowDefinition {
   if (!isObject(raw)) throw new FlowParseError("Flow must be a JSON object");
   const id = requireString(raw, "id", "flow");
   const name = requireString(raw, "name", "flow");

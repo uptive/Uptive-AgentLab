@@ -1,5 +1,7 @@
-import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { MODEL_CATALOG, type AgentDefinition, type AgentInput, type AgentStatus, type ToolRef } from "@agentlab/contracts";
+import { BUILTIN_TOOLS, FUNCTION_TOOLS } from "@agentlab/agent-runtime";
+import type { AgentDraft, AgentSource, SourcedAgent } from "../../electron/api.js";
 import { theme } from "../theme.js";
 import { SkillPicker, ToolPicker } from "../library/ToolPicker.js";
 import { useLibrary } from "../library/useLibrary.js";
@@ -97,6 +99,31 @@ function toInput(form: FormState, existing?: AgentDefinition): AgentInput {
     inputSchema: parseSchema("Input schema", form.inputSchema),
     outputSchema: parseSchema("Output schema", form.outputSchema),
     limits: { maxTokens: toNumber(form.limitMaxTokens), maxCostUsd: toNumber(form.limitMaxCostUsd) },
+  };
+}
+
+/** Tools a draft may propose: the built-in tools and the app's function tools. */
+const DRAFTABLE_TOOLS = [...BUILTIN_TOOLS.map((t) => t.name), ...FUNCTION_TOOLS.map((t) => t.id)];
+
+/** Overlays a Claude-generated draft on the form; status and limits stay as the user set them. */
+function applyDraft(form: FormState, draft: AgentDraft): FormState {
+  const tools: ToolRef[] = [];
+  for (const name of new Set(draft.tools)) {
+    if (BUILTIN_TOOLS.some((t) => t.name === name)) tools.push({ id: name, name, kind: "builtin" });
+    const fn = FUNCTION_TOOLS.find((t) => t.id === name);
+    if (fn) tools.push({ id: fn.id, name: fn.label, kind: "function" });
+  }
+  return {
+    ...form,
+    name: draft.name,
+    description: draft.description,
+    role: draft.role,
+    systemInstructions: draft.systemInstructions,
+    model: draft.model,
+    effort: draft.effort,
+    tools,
+    inputSchema: stringifySchema(draft.inputSchema),
+    outputSchema: stringifySchema(draft.outputSchema),
   };
 }
 
@@ -261,6 +288,130 @@ function StatInput({
 
 const twoColumns: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
 
+function DescribeBox({
+  value,
+  onChange,
+  onGenerate,
+  generating,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onGenerate: () => void;
+  generating: boolean;
+}) {
+  return (
+    <section
+      style={{
+        marginBottom: 22,
+        padding: 14,
+        borderRadius: 10,
+        border: `1px solid ${theme.border}`,
+        background: theme.codeBg,
+      }}
+    >
+      <h3 style={{ ...titleStyle, fontSize: 14, marginBottom: 4 }}>Describe your agent</h3>
+      <p style={{ margin: "0 0 10px", fontSize: 13, color: theme.textSecondary }}>
+        Explain what it should achieve and Claude will propose the fields below.
+      </p>
+      <textarea
+        aria-label="Agent description for Claude"
+        style={{ ...fieldInput, minHeight: 90, resize: "vertical", lineHeight: 1.5 }}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            if (!generating) onGenerate();
+          }
+        }}
+        placeholder="e.g. Reviews pull request diffs for security issues and returns a list of findings with severity and a suggested fix"
+        disabled={generating}
+      />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
+        {generating ? <span style={{ fontSize: 13, color: theme.textMuted }}>Claude is drafting… this can take a minute</span> : null}
+        <button
+          type="button"
+          style={{ ...pillButton, opacity: generating || !value.trim() ? 0.6 : 1 }}
+          onClick={onGenerate}
+          disabled={generating || !value.trim()}
+        >
+          {generating ? "Generating…" : "Generate fields"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function DraftRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <span style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 3 }}>{label}</span>
+      <div style={{ fontSize: 14, color: theme.text, lineHeight: 1.45 }}>{children}</div>
+    </div>
+  );
+}
+
+const draftCode: CSSProperties = {
+  margin: 0,
+  padding: "8px 10px",
+  maxHeight: 180,
+  overflow: "auto",
+  borderRadius: 6,
+  background: theme.surface,
+  border: `1px solid ${theme.border}`,
+  fontFamily: theme.fontMono,
+  fontSize: 12,
+  whiteSpace: "pre-wrap",
+};
+
+function DraftPreview({ draft, onApply, onDiscard }: { draft: AgentDraft; onApply: () => void; onDiscard: () => void }) {
+  return (
+    <section
+      aria-label="Proposed agent fields"
+      style={{
+        marginBottom: 22,
+        padding: 14,
+        borderRadius: 10,
+        border: `1px solid ${theme.primary}`,
+        background: theme.codeBg,
+      }}
+    >
+      <h3 style={{ ...titleStyle, fontSize: 14, marginBottom: 12 }}>Proposed fields</h3>
+      <DraftRow label="Name">{draft.name}</DraftRow>
+      <DraftRow label="Description">{draft.description}</DraftRow>
+      <DraftRow label="Role">{draft.role}</DraftRow>
+      <DraftRow label="Model">
+        <span style={{ fontFamily: theme.fontMono, fontSize: 13 }}>{draft.model}</span>
+        <span style={{ color: theme.textMuted }}>
+          {" "}
+          · effort {draft.effort}
+        </span>
+      </DraftRow>
+      <DraftRow label="Tools">
+        {draft.tools.length ? draft.tools.join(", ") : "None"}
+      </DraftRow>
+      <DraftRow label="System instructions">
+        <pre style={draftCode}>{draft.systemInstructions}</pre>
+      </DraftRow>
+      <details style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>
+        <summary style={{ cursor: "pointer" }}>Input / output schema</summary>
+        <div style={{ ...twoColumns, marginTop: 8 }}>
+          <pre style={draftCode}>{stringifySchema(draft.inputSchema)}</pre>
+          <pre style={draftCode}>{stringifySchema(draft.outputSchema)}</pre>
+        </div>
+      </details>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" style={ghostButton} onClick={onDiscard}>
+          Discard
+        </button>
+        <button type="button" style={pillButton} onClick={onApply}>
+          Apply to form
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function AgentCard({ agent, onOpen }: { agent: AgentDefinition; onOpen: () => void }) {
   return (
     <button
@@ -315,13 +466,151 @@ function AgentCard({ agent, onOpen }: { agent: AgentDefinition; onOpen: () => vo
   );
 }
 
+const SOURCE_LABELS: Record<AgentSource, string> = { local: "Local", database: "Database" };
+
+const SOURCE_HINTS: Record<AgentSource, string> = {
+  local: "JSON file in data/local-agents/, only on this computer",
+  database: "MongoDB, shared with the team",
+};
+
+function SourcePicker({
+  value,
+  onChange,
+  databaseError,
+}: {
+  value: AgentSource;
+  onChange: (source: AgentSource) => void;
+  databaseError?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label="Save to" style={{ marginBottom: 18 }}>
+      <span style={{ display: "block", fontSize: 13, fontWeight: 500, color: theme.textSecondary, marginBottom: 6 }}>
+        Save to
+      </span>
+      <div style={twoColumns}>
+        {(["local", "database"] as const).map((source) => {
+          const selected = value === source;
+          const unavailable = source === "database" && !!databaseError;
+          return (
+            <button
+              key={source}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={unavailable}
+              onClick={() => onChange(source)}
+              style={{
+                textAlign: "left",
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: `${selected ? 2 : 1}px solid ${selected ? theme.primary : theme.border}`,
+                background: theme.surface,
+                color: theme.text,
+                font: "inherit",
+                cursor: unavailable ? "not-allowed" : "pointer",
+                opacity: unavailable ? 0.5 : 1,
+              }}
+            >
+              <span style={{ display: "block", fontWeight: 600, fontSize: 14 }}>{SOURCE_LABELS[source]}</span>
+              <span style={{ display: "block", fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+                {unavailable ? "MongoDB is unreachable" : SOURCE_HINTS[source]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const inlineCode: CSSProperties = {
+  fontFamily: theme.fontMono,
+  fontSize: 12,
+  padding: "1px 5px",
+  borderRadius: 4,
+  background: theme.surface,
+  border: `1px solid ${theme.border}`,
+};
+
+function LocalAgentsHelp() {
+  return (
+    <div
+      style={{
+        margin: "0 0 14px",
+        padding: "12px 16px",
+        borderRadius: 8,
+        border: `1px solid ${theme.border}`,
+        background: theme.codeBg,
+        fontSize: 13,
+        lineHeight: 1.55,
+        color: theme.textSecondary,
+      }}
+    >
+      <p style={{ margin: "0 0 6px" }}>
+        Local agents are private: they are saved as JSON files on this computer only, the folder is gitignored, and
+        they are never sent to MongoDB. Add one in either of two ways:
+      </p>
+      <ol style={{ margin: 0, paddingLeft: 20 }}>
+        <li>
+          Click <strong>+ New agent</strong> and choose <strong>Local</strong> under <em>Save to</em>.
+        </li>
+        <li>
+          Drop a <code style={inlineCode}>.json</code> file into <code style={inlineCode}>data/local-agents/</code>{" "}
+          (or the folder in <code style={inlineCode}>LOCAL_AGENTS_DIR</code>) and press <strong>Refresh</strong>. It
+          needs <code style={inlineCode}>name</code>, <code style={inlineCode}>role</code>,{" "}
+          <code style={inlineCode}>model</code> and <code style={inlineCode}>systemInstructions</code>; without an{" "}
+          <code style={inlineCode}>id</code>, the file name is used. Invalid files are skipped with a warning in the
+          console.
+        </li>
+      </ol>
+    </div>
+  );
+}
+
+function AgentSection({
+  title,
+  hint,
+  agents,
+  notice,
+  onOpen,
+}: {
+  title: string;
+  hint: string;
+  agents: SourcedAgent[];
+  notice?: ReactNode;
+  onOpen: (agent: SourcedAgent) => void;
+}) {
+  return (
+    <section style={{ marginBottom: 28 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
+        <h2 style={{ ...titleStyle, fontSize: 18 }}>{title}</h2>
+        <span style={{ fontSize: 13, color: theme.textMuted }}>
+          {agents.length} · {hint}
+        </span>
+      </div>
+      {notice}
+      {agents.length === 0 ? (
+        notice ? null : <p style={{ color: theme.textMuted, margin: 0 }}>No agents yet.</p>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 14 }}>
+          {agents.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} onOpen={() => onOpen(agent)} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function AgentsView() {
-  const [agents, setAgents] = useState<AgentDefinition[]>([]);
+  const [agents, setAgents] = useState<SourcedAgent[]>([]);
+  const [databaseError, setDatabaseError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   // undefined = drawer closed, null = creating, agent = editing
-  const [editing, setEditing] = useState<AgentDefinition | null>();
+  const [editing, setEditing] = useState<SourcedAgent | null>();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [saveTo, setSaveTo] = useState<AgentSource>("database");
   const [saving, setSaving] = useState(false);
   const library = useLibrary();
   const refreshLibrary = library.refresh;
@@ -330,11 +619,19 @@ export function AgentsView() {
   useEffect(() => {
     if (editing !== undefined) void refreshLibrary();
   }, [editing, refreshLibrary]);
+  const [roles, setRoles] = useState<string[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [draft, setDraft] = useState<AgentDraft>();
+  const [generating, setGenerating] = useState(false);
+  // Bumped whenever the drawer opens or closes, so a draft that finishes afterwards is dropped.
+  const draftRequest = useRef(0);
 
-  async function refresh() {
+  async function refresh(reloadLocal = false) {
     setLoading(true);
     try {
-      setAgents(await window.agentlab.agents.list());
+      const listing = await window.agentlab.agents.load({ reloadLocal });
+      setAgents(listing.agents);
+      setDatabaseError(listing.databaseError ? errorMessage(listing.databaseError) : undefined);
       setError(undefined);
     } catch (e) {
       setError(errorMessage(e));
@@ -350,7 +647,11 @@ export function AgentsView() {
   const drawerOpen = editing !== undefined;
 
   useEffect(() => {
+    draftRequest.current++;
+    setGenerating(false);
     if (!drawerOpen) return;
+    // Suggestions only; the form still works if the role list can't be loaded.
+    window.agentlab.roles.list().then(setRoles, () => setRoles([]));
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setEditing(undefined);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -360,9 +661,26 @@ export function AgentsView() {
     setError(undefined);
     setEditing(null);
     setForm(EMPTY_FORM);
+    setSaveTo(databaseError ? "local" : "database");
+    setPrompt("");
+    setDraft(undefined);
   }
 
-  function openEdit(agent: AgentDefinition) {
+  async function handleGenerate() {
+    const request = ++draftRequest.current;
+    setGenerating(true);
+    setError(undefined);
+    try {
+      const result = await window.agentlab.agents.draft({ description: prompt, models: MODELS, tools: DRAFTABLE_TOOLS });
+      if (request === draftRequest.current) setDraft(result);
+    } catch (e) {
+      if (request === draftRequest.current) setError(errorMessage(e));
+    } finally {
+      if (request === draftRequest.current) setGenerating(false);
+    }
+  }
+
+  function openEdit(agent: SourcedAgent) {
     setError(undefined);
     setEditing(agent);
     setForm(toForm(agent));
@@ -376,7 +694,7 @@ export function AgentsView() {
       if (editing) {
         await window.agentlab.agents.update(editing.id, input);
       } else {
-        await window.agentlab.agents.create(input);
+        await window.agentlab.agents.create(input, saveTo);
       }
       setEditing(undefined);
       await refresh();
@@ -387,7 +705,7 @@ export function AgentsView() {
     }
   }
 
-  async function handleDelete(agent: AgentDefinition) {
+  async function handleDelete(agent: SourcedAgent) {
     try {
       await window.agentlab.agents.delete(agent.id);
       if (editing?.id === agent.id) setEditing(undefined);
@@ -399,6 +717,9 @@ export function AgentsView() {
 
   const set = (key: keyof FormState) => (e: { target: { value: string } }) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
+  const localAgents = agents.filter((agent) => agent.source === "local");
+  const databaseAgents = agents.filter((agent) => agent.source === "database");
 
   const modelOptions = MODELS.includes(form.model) || !form.model ? MODELS : [form.model, ...MODELS];
 
@@ -420,8 +741,9 @@ export function AgentsView() {
         <div style={{ display: "flex", gap: 8 }}>
           <button
             style={{ ...ghostButton, padding: "10px 20px", fontSize: 15, opacity: loading ? 0.6 : 1 }}
-            onClick={() => void refresh()}
+            onClick={() => void refresh(true)}
             disabled={loading}
+            title="Reload agents from MongoDB and re-read data/local-agents/"
           >
             {loading ? "Refreshing…" : "Refresh"}
           </button>
@@ -435,14 +757,29 @@ export function AgentsView() {
 
       {loading && agents.length === 0 ? (
         <p style={{ color: theme.textMuted }}>Loading agents…</p>
-      ) : agents.length === 0 ? (
-        <p style={{ color: theme.textMuted }}>No agents yet.</p>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 14 }}>
-          {agents.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} onOpen={() => openEdit(agent)} />
-          ))}
-        </div>
+        <>
+          <AgentSection
+            title="Local"
+            hint="JSON files in data/local-agents/, not committed"
+            agents={localAgents}
+            onOpen={openEdit}
+            notice={<LocalAgentsHelp />}
+          />
+          <AgentSection
+            title="Database"
+            hint="shared through MongoDB"
+            agents={databaseAgents}
+            onOpen={openEdit}
+            notice={
+              databaseError ? (
+                <p style={{ margin: "0 0 12px", fontSize: 14, color: theme.errorText }}>
+                  Could not reach MongoDB: {databaseError}
+                </p>
+              ) : undefined
+            }
+          />
+        </>
       )}
 
       {drawerOpen ? (
@@ -485,7 +822,9 @@ export function AgentsView() {
                   {editing ? editing.name : "New agent"}
                 </h2>
                 {editing ? (
-                  <span style={{ fontFamily: theme.fontMono, fontSize: 12, color: theme.textMuted }}>{editing.id}</span>
+                  <span style={{ fontFamily: theme.fontMono, fontSize: 12, color: theme.textMuted }}>
+                    {SOURCE_LABELS[editing.source]} · {editing.id}
+                  </span>
                 ) : null}
               </div>
               <button
@@ -500,6 +839,25 @@ export function AgentsView() {
 
             <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
               {error ? <ErrorBanner message={error} onDismiss={() => setError(undefined)} /> : null}
+
+              {editing === null ? (
+                draft ? (
+                  <DraftPreview
+                    draft={draft}
+                    onApply={() => {
+                      setForm((prev) => applyDraft(prev, draft));
+                      setDraft(undefined);
+                    }}
+                    onDiscard={() => setDraft(undefined)}
+                  />
+                ) : (
+                  <DescribeBox value={prompt} onChange={setPrompt} onGenerate={() => void handleGenerate()} generating={generating} />
+                )
+              ) : null}
+
+              {editing ? null : (
+                <SourcePicker value={saveTo} onChange={setSaveTo} databaseError={databaseError} />
+              )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 12 }}>
                 <Field label="Name *">
@@ -519,11 +877,17 @@ export function AgentsView() {
               <Field label="Role *">
                 <input
                   style={fieldInput}
+                  list="agent-roles"
                   value={form.role}
                   onChange={set("role")}
-                  placeholder="e.g. Researches sources and summarizes findings"
+                  placeholder="Pick or type a role, e.g. reviewer"
                   required
                 />
+                <datalist id="agent-roles">
+                  {roles.map((role) => (
+                    <option key={role} value={role} />
+                  ))}
+                </datalist>
               </Field>
               <Field label="System instructions *">
                 <textarea

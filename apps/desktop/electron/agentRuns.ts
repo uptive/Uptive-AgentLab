@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { cp, readdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentDefinition, AgentStore, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
+import type { AgentDefinition, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
 import { demoAgents } from "@agentlab/agent-runtime";
 import { createClaudeAgentRuntime, createClaudeCodeJsonClient, getClaudeAuthStatus, testMcpServer, type ClaudeAuthStatus } from "@agentlab/agent-runtime/claude";
 import { createMcpServerFileStore, createSkillFileStore, parseSkillFile } from "@agentlab/agent-runtime/library";
@@ -34,8 +34,8 @@ export function claudeBinaryPath(): string | undefined {
 }
 
 export interface AgentRunsDeps {
-  /** Saved agents (MongoDB + data/agents); may reject when the database is unreachable. */
-  getAgentStore: () => Promise<AgentStore>;
+  /** A saved agent (local folder or MongoDB); may reject when the database is unreachable. */
+  getAgent: (id: string) => Promise<AgentDefinition | undefined>;
   /** Folder for committed library data (skills/, mcp-servers/). */
   dataDir: string;
 }
@@ -65,16 +65,15 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
   /** Saved agents win over built-in ones with the same id. */
   async function resolveAgents(flow: FlowDefinition): Promise<Map<string, AgentDefinition>> {
     const resolved = new Map<string, AgentDefinition>();
-    let store: AgentStore | undefined;
-    try {
-      store = await deps.getAgentStore();
-    } catch (error) {
-      console.warn("[runs] agent store unavailable, using built-in agents only:", (error as Error).message);
-    }
     const builtins = builtinAgents();
     for (const id of new Set(flow.nodes.map((n) => n.agentId))) {
-      const agent = (await store?.get(id).catch(() => undefined)) ?? builtins.find((a) => a.id === id);
-      if (agent) resolved.set(id, agent);
+      const saved = await deps.getAgent(id).catch((error) => {
+        console.warn(`[runs] could not look up agent ${id}, trying built-in agents:`, (error as Error).message);
+        return undefined;
+      });
+      // Listed agents carry a UI-only source tag; keep it out of run snapshots.
+      const { source: _source, ...agent } = (saved ?? builtins.find((a) => a.id === id) ?? {}) as AgentDefinition & { source?: string };
+      if (agent.id) resolved.set(id, agent);
     }
     return resolved;
   }

@@ -30,7 +30,8 @@ export const demoAgents: AgentDefinition[] = [
   {
     id: "planner",
     name: "Planner",
-    role: "Breaks the task down into a review plan",
+    role: "planner",
+    description: "Breaks the task down into a review plan",
     status: "active",
     systemInstructions:
       "You plan code reviews. Read the pull request (title, description and diff) and produce a short review plan: what the change does, the risky areas, and what the code reviewer and the security reviewer should each focus on.",
@@ -51,7 +52,8 @@ export const demoAgents: AgentDefinition[] = [
   {
     id: "code-reviewer",
     name: "Code Reviewer",
-    role: "Reviews code for bugs and regressions",
+    role: "reviewer",
+    description: "Reviews code for bugs and regressions",
     status: "active",
     systemInstructions:
       "You review code changes for bugs, regressions and unclear logic, following the plan you are given. If a repository folder is available, read the surrounding code to confirm a finding before reporting it. Report only real problems, most severe first.",
@@ -67,7 +69,8 @@ export const demoAgents: AgentDefinition[] = [
   {
     id: "security-reviewer",
     name: "Security Reviewer",
-    role: "Reviews code for security risks",
+    role: "reviewer",
+    description: "Reviews code for security risks",
     status: "active",
     systemInstructions:
       "You review code changes for security risks such as injection, leaked secrets, missing authorization and unsafe input handling, following the plan you are given. Report only real risks, most severe first.",
@@ -82,7 +85,8 @@ export const demoAgents: AgentDefinition[] = [
   {
     id: "final-validator",
     name: "Final Validator",
-    role: "Combines both reviews into a final verdict",
+    role: "validator",
+    description: "Combines both reviews into a final verdict",
     status: "active",
     systemInstructions:
       "You receive a code review and a security review of the same change. Combine them into one verdict: approve if there are no high-severity findings, otherwise request changes. List the reasons.",

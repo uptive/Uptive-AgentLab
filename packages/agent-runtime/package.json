@@ -8,7 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./mongo": "./src/mongo.ts",
-    "./files": "./src/fileMirror.ts",
+    "./files": "./src/fileAgentStore.ts",
     "./claude": "./src/claude/index.ts",
     "./library": "./src/library.ts"
   },

@@ -3,8 +3,8 @@
 import type {
   AgentDefinition,
   AgentInput,
-  AgentStore,
   FlowDefinition,
+  FlowStore,
   McpServerDefinition,
   McpServerInput,
   Run,
@@ -54,6 +54,54 @@ export interface ImportResult {
 
 export type { ClaudeAuthStatus, McpTestResult };
 
+/** Where an agent is stored: a JSON file in the git-ignored local folder, or MongoDB. */
+export type AgentSource = "local" | "database";
+
+export type SourcedAgent = AgentDefinition & { source: AgentSource };
+
+export interface AgentListing {
+  agents: SourcedAgent[];
+  /** Set when MongoDB could not be reached; local agents are still listed. */
+  databaseError?: string;
+}
+
+/** Satisfies the AgentStore contract; each agent is tagged with the store it lives in. */
+export interface AgentsApi {
+  /** Local and database agents together. Database agents are left out when MongoDB is unreachable. */
+  list(): Promise<SourcedAgent[]>;
+  /** Like list(), but also reports why database agents are missing. `reloadLocal` re-reads the local folder first. */
+  load(options?: { reloadLocal?: boolean }): Promise<AgentListing>;
+  get(id: string): Promise<SourcedAgent | undefined>;
+  /** Saves to MongoDB unless `source` is "local". */
+  create(input: AgentInput, source?: AgentSource): Promise<SourcedAgent>;
+  /** Updates and deletes go to whichever store holds the agent. */
+  update(id: string, patch: Partial<AgentInput>): Promise<SourcedAgent>;
+  delete(id: string): Promise<boolean>;
+}
+
+export interface AgentDraftRequest {
+  /** Free-text description of what the agent should achieve. */
+  description: string;
+  /** Model ids the draft may pick from. */
+  models: string[];
+  /** Tool names the draft may pick from (built-in and function tools). */
+  tools: string[];
+}
+
+/** Agent fields proposed by Claude from a free-text description; reviewed in the form before applying. */
+export interface AgentDraft {
+  name: string;
+  description: string;
+  role: string;
+  systemInstructions: string;
+  model: string;
+  effort: "low" | "medium" | "high" | "xhigh" | "max";
+  /** Names from AgentDraftRequest.tools. */
+  tools: string[];
+  inputSchema: unknown;
+  outputSchema: unknown;
+}
+
 export interface AgentLabApi {
   projects: {
     list(): Promise<ProjectsState>;
@@ -71,7 +119,16 @@ export interface AgentLabApi {
     /** Writes a registered flow file. */
     write(filePath: string, json: string): Promise<ProjectEntry>;
   };
-  agents: AgentStore;
+  agents: AgentsApi & {
+    /** Asks the claude CLI to map a description into agent fields. Nothing is saved. */
+    draft(request: AgentDraftRequest): Promise<AgentDraft>;
+  };
+  /** Flows saved to MongoDB. Independent of the local file flows above — not synced with them. */
+  cloudFlows: FlowStore;
+  roles: {
+    /** Reusable role names, persisted in MongoDB. */
+    list(): Promise<string[]>;
+  };
   /** Telemetry CRUD plus the load/save snapshot adapter used by the renderer's sync TelemetryStore. */
   telemetry: AsyncTelemetryStore & {
     load(): Promise<PersistedState | null>;
@@ -123,6 +180,10 @@ export const IPC = {
   revealProject: "projects:reveal",
   readFlow: "flows:read",
   writeFlow: "flows:write",
+  listCloudFlows: "cloudFlows:list",
+  getCloudFlow: "cloudFlows:get",
+  saveCloudFlow: "cloudFlows:save",
+  deleteCloudFlow: "cloudFlows:delete",
   generateJson: "optimization:generate-json",
   startRun: "runs:start",
   cancelRun: "runs:cancel",

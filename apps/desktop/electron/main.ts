@@ -4,17 +4,29 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MongoClient, ServerApiVersion } from "mongodb";
-import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
+import {
+  DEFAULT_AGENT_ROLES,
+  type AgentDefinition,
+  type AgentInput,
+  type AgentRoleStore,
+  type AgentStore,
+  type FlowDefinition,
+  type FlowStore,
+  type Run,
+  type TraceEvent,
+} from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
-import { createMongoAgentStore } from "@agentlab/agent-runtime/mongo";
-import { createAgentFileMirror, createMirroredAgentStore } from "@agentlab/agent-runtime/files";
+import { createMongoAgentStore, createMongoRoleStore } from "@agentlab/agent-runtime/mongo";
+import { createFileAgentStore } from "@agentlab/agent-runtime/files";
+import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
 import type { JsonRequest } from "@agentlab/optimization";
 import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
-import { IPC, type ProjectEntry } from "./api.js";
+import { generateAgentDraft } from "./agentDraft.js";
+import { IPC, type AgentDraftRequest, type AgentListing, type AgentSource, type ProjectEntry, type SourcedAgent } from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
-import { registerAgentRunIpc } from "./agentRuns.js";
+import { claudeBinaryPath, registerAgentRunIpc } from "./agentRuns.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +59,8 @@ for (const envPath of [path.resolve(__dirname, "../.env"), path.resolve(__dirnam
 interface Stores {
   client: MongoClient;
   agents: AgentStore;
+  flows: FlowStore;
+  roles: AgentRoleStore;
   telemetry: AsyncTelemetryStore;
 }
 
@@ -63,16 +77,16 @@ async function connect(): Promise<Stores> {
   });
   await client.connect();
   const db = client.db(process.env.MONGODB_DB || "agentlab");
-  const [mongoAgents, telemetry] = await Promise.all([createMongoAgentStore(db), createMongoTelemetryStore(db)]);
+  const [agents, flows, roles, telemetry] = await Promise.all([
+    createMongoAgentStore(db),
+    createMongoFlowStore(db),
+    createMongoRoleStore(db),
+    createMongoTelemetryStore(db),
+  ]);
 
-  // Agents are read from MongoDB and kept in two-way sync with JSON files in data/agents/ (which
-  // can be committed). The sync runs now and again whenever the agent list is loaded.
-  const mirror = createAgentFileMirror(process.env.AGENTS_DIR || path.resolve(__dirname, "../../../data/agents"));
-  const agents = createMirroredAgentStore(mongoAgents, mirror);
-  const synced = await agents.sync();
-  if (synced) console.log(`[agents] synced ${mirror.dir}: ${synced.toDb} to database, ${synced.toFiles} to files`);
-
-  return { client, agents, telemetry };
+  // Flows saved to MongoDB are independent of local flow files (no mirroring): the flows list
+  // shows both sources together, and the user picks where each flow lives.
+  return { client, agents, flows, roles, telemetry };
 }
 
 function getStores(): Promise<Stores> {
@@ -81,6 +95,59 @@ function getStores(): Promise<Stores> {
     throw error;
   });
   return stores;
+}
+
+// Local agents are JSON files in a git-ignored folder, read at startup and again when the renderer
+// asks for a reload. They work without MongoDB.
+const localAgents = createFileAgentStore(
+  process.env.LOCAL_AGENTS_DIR || path.resolve(__dirname, "../../../data/local-agents"),
+);
+let localAgentsLoaded: Promise<void> = Promise.resolve();
+
+function loadLocalAgents() {
+  // Chained so a reload never runs alongside an earlier one.
+  localAgentsLoaded = localAgentsLoaded.then(() =>
+    localAgents.load().then(
+      (count) => console.log(`[agents] loaded ${count} local agents from ${localAgents.dir}`),
+      (error) => console.error(`[agents] could not load local agents from ${localAgents.dir}:`, error.message),
+    ),
+  );
+  return localAgentsLoaded;
+}
+
+const tag =
+  (source: AgentSource) =>
+  (agent: AgentDefinition): SourcedAgent => ({ ...agent, source });
+
+// Drops the source tag in case a caller passes a listed agent back in, so it is never stored.
+function withoutSource<T extends object>(input: T): T {
+  const { source: _source, ...rest } = input as T & { source?: AgentSource };
+  return rest as T;
+}
+
+/** The store holding an agent: the local folder when the id is found there, otherwise MongoDB. */
+async function agentStoreFor(id: string): Promise<[AgentStore, AgentSource]> {
+  await localAgentsLoaded;
+  if (await localAgents.get(id)) return [localAgents, "local"];
+  return [(await getStores()).agents, "database"];
+}
+
+/** Adds a saved agent's role to the reusable list. Best effort, so local agents still save without MongoDB. */
+async function rememberRole(role: string) {
+  try {
+    await (await getStores()).roles.add(role);
+  } catch (error) {
+    console.warn("[roles] could not save role:", (error as Error).message);
+  }
+}
+
+/** The reusable roles from MongoDB, or the defaults when MongoDB is unreachable. */
+async function listRoles(): Promise<string[]> {
+  try {
+    return await (await getStores()).roles.list();
+  } catch {
+    return DEFAULT_AGENT_ROLES;
+  }
 }
 
 // Telemetry payload guard for the load/save bridge used by the renderer's RunPersistenceAdapter.
@@ -158,18 +225,51 @@ function registerIpc(store: EditorConfigStore) {
     return store.entry(filePath);
   });
 
-  ipcMain.handle("agents:list", async () => (await getStores()).agents.list());
-  ipcMain.handle("agents:get", async (_e, id: string) => (await getStores()).agents.get(id));
-  ipcMain.handle("agents:create", async (_e, input: AgentInput) => (await getStores()).agents.create(input));
-  ipcMain.handle("agents:update", async (_e, id: string, patch: Partial<AgentInput>) =>
-    (await getStores()).agents.update(id, patch),
-  );
-  ipcMain.handle("agents:delete", async (_e, id: string) => (await getStores()).agents.delete(id));
+  ipcMain.handle("agents:load", async (_e, options?: { reloadLocal?: boolean }): Promise<AgentListing> => {
+    await (options?.reloadLocal ? loadLocalAgents() : localAgentsLoaded);
+    const local = (await localAgents.list()).map(tag("local"));
+    try {
+      const database = (await (await getStores()).agents.list()).map(tag("database"));
+      return { agents: [...local, ...database] };
+    } catch (error) {
+      return { agents: local, databaseError: (error as Error).message };
+    }
+  });
+  ipcMain.handle("agents:get", async (_e, id: string) => {
+    const [store, source] = await agentStoreFor(id);
+    const agent = await store.get(id);
+    return agent && tag(source)(agent);
+  });
+  ipcMain.handle("agents:create", async (_e, input: AgentInput, source?: AgentSource) => {
+    await localAgentsLoaded;
+    const target: AgentSource = source === "local" ? "local" : "database";
+    const store = target === "local" ? localAgents : (await getStores()).agents;
+    const agent = await store.create(withoutSource(input));
+    await rememberRole(agent.role);
+    return tag(target)(agent);
+  });
+  ipcMain.handle("agents:update", async (_e, id: string, patch: Partial<AgentInput>) => {
+    const [store, source] = await agentStoreFor(id);
+    const agent = await store.update(id, withoutSource(patch));
+    if (patch.role !== undefined) await rememberRole(agent.role);
+    return tag(source)(agent);
+  });
+  ipcMain.handle("agents:delete", async (_e, id: string) => {
+    const [store] = await agentStoreFor(id);
+    return store.delete(id);
+  });
+  // Roles are read here rather than passed from the renderer, so the draft always sees the current list.
+  ipcMain.handle("agents:draft", async (_e, request: AgentDraftRequest) => generateAgentDraft(request, await listRoles(), claudeBinaryPath()));
+  ipcMain.handle("roles:list", () => listRoles());
 
-  // Real flow runs plus the skill and MCP libraries. Library data sits next to data/agents in
-  // development (so it can be committed) and in the app's user data folder when packaged.
+  // Real flow runs plus the skill and MCP libraries. Library data sits in data/ in development
+  // (so it can be committed) and in the app's user data folder when packaged.
   const { jsonClient } = registerAgentRunIpc({
-    getAgentStore: async () => (await getStores()).agents,
+    // Same lookup as the agent IPC: the local folder first, then MongoDB.
+    getAgent: async (id) => {
+      const [store] = await agentStoreFor(id);
+      return store.get(id);
+    },
     dataDir: app.isPackaged ? app.getPath("userData") : path.resolve(__dirname, "../../../data"),
   });
 
@@ -177,6 +277,11 @@ function registerIpc(store: EditorConfigStore) {
   // With an API key they go through the API; otherwise through the Claude Code login (subscription).
   const modelClient = process.env.ANTHROPIC_API_KEY ? createAnthropicModelClient() : jsonClient;
   ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
+
+  ipcMain.handle(IPC.listCloudFlows, async () => (await getStores()).flows.list());
+  ipcMain.handle(IPC.getCloudFlow, async (_e, id: string) => (await getStores()).flows.get(id));
+  ipcMain.handle(IPC.saveCloudFlow, async (_e, flow: FlowDefinition) => (await getStores()).flows.save(flow));
+  ipcMain.handle(IPC.deleteCloudFlow, async (_e, id: string) => (await getStores()).flows.delete(id));
 
   ipcMain.handle("telemetry:recordEvent", async (_e, event: TraceEvent) => (await getStores()).telemetry.recordEvent(event));
   ipcMain.handle("telemetry:listEvents", async (_e, runId: string) => (await getStores()).telemetry.listEvents(runId));
@@ -238,6 +343,7 @@ app.whenReady().then(() => {
     path.join(app.getPath("userData"), "editor-config.json"),
     path.join(app.getPath("documents"), "AgentLab", "Flows"),
   );
+  void loadLocalAgents();
   registerIpc(store);
   getStores().then(
     () => console.log("[db] connected to MongoDB"),

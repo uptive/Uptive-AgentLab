@@ -15,9 +15,9 @@ import {
   type IsValidConnection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { FlowDefinition } from "@agentlab/contracts";
-import { dummyAgentRegistry, serializeFlow, topologicalLevels, validateFlow, wouldCreateCycle } from "@agentlab/flow-engine";
-import { colors } from "../theme.js";
+import type { AgentDefinition, FlowDefinition } from "@agentlab/contracts";
+import { serializeFlow, topologicalLevels, validateFlow, wouldCreateCycle } from "@agentlab/flow-engine";
+import { alpha, theme, useThemeMode } from "../theme.js";
 import { AgentNode } from "./AgentNode.js";
 import { AgentPalette, AGENT_DRAG_MIME } from "./AgentPalette.js";
 import { bridge, errorMessage } from "./bridge.js";
@@ -39,26 +39,51 @@ import { useDemoRun } from "./useDemoRun.js";
 
 const nodeTypes = { agent: AgentNode };
 const edgeTypes = { flow: FlowEdge };
-const agents = dummyAgentRegistry.list();
-const agentsById = new Map(agents.map((a) => [a.id, a]));
-const knownAgentIds = agents.map((a) => a.id);
+
+/** Where a flow is persisted: a local file, or a MongoDB document. The two are independent — a flow lives in exactly one place. */
+export type FlowSource = { kind: "local"; filePath: string } | { kind: "cloud"; id: string };
 
 interface Props {
-  filePath: string;
+  source: FlowSource;
   initialFlow: FlowDefinition;
   /** Called to go back to the project view. */
   onClose: () => void;
 }
 
 export function FlowEditor(props: Props) {
+  // Agents are loaded from MongoDB (via the main process) once per editor session, same
+  // data AgentsView edits — so a step always reflects the agent's real name/role/model.
+  const [agents, setAgents] = useState<AgentDefinition[]>();
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    let cancelled = false;
+    bridge()
+      .agents.list()
+      .then((list) => !cancelled && setAgents(list))
+      .catch((err) => !cancelled && setError(errorMessage(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) {
+    return <div style={{ padding: 24, color: DANGER }}>Could not load agents: {error}</div>;
+  }
+  if (!agents) {
+    return <div style={{ padding: 24, opacity: 0.7 }}>Loading agents…</div>;
+  }
+
   return (
     <ReactFlowProvider>
-      <FlowEditorInner {...props} />
+      <FlowEditorInner {...props} agents={agents} />
     </ReactFlowProvider>
   );
 }
 
-function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
+function FlowEditorInner({ source, initialFlow, onClose, agents }: Props & { agents: AgentDefinition[] }) {
+  const agentsById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
+  const knownAgentIds = useMemo(() => agents.map((a) => a.id), [agents]);
   const initial = useMemo(() => flowToGraph(initialFlow), [initialFlow]);
   const [meta, setMeta] = useState<FlowMeta>(initial.meta);
   const [nodes, setNodes, onNodesChange] = useNodesState<AgentFlowNode>(initial.nodes);
@@ -70,11 +95,12 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
   const demo = useDemoRun();
   const playing = demo.frame?.playing ?? false;
   const { screenToFlowPosition, fitView } = useReactFlow();
+  const colorMode = useThemeMode();
 
   // ---- Derived state -------------------------------------------------------
   const flow = useMemo(() => graphToFlow(meta, nodes, edges), [meta, nodes, edges]);
   const json = useMemo(() => serializeFlow(flow), [flow]);
-  const validation = useMemo(() => validateFlow(flow, { knownAgentIds }), [flow]);
+  const validation = useMemo(() => validateFlow(flow, { knownAgentIds }), [flow, knownAgentIds]);
   const levels = useMemo(() => {
     try {
       return topologicalLevels(flow);
@@ -90,7 +116,7 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
     for (const e of edges) incoming[e.target] = (incoming[e.target] ?? 0) + 1;
     const invalidNodeIds = new Set(validation.errors.flatMap((e) => (e.nodeId ? [e.nodeId] : [])));
     return { agentsById, incoming, invalidNodeIds, demo: demo.frame };
-  }, [edges, validation, demo.frame]);
+  }, [agentsById, edges, validation, demo.frame]);
 
   // Any structural edit invalidates a finished demo run's picture.
   const stopDemo = demo.stop;
@@ -169,7 +195,8 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
     if (saving) return;
     setSaving(true);
     try {
-      await bridge().flows.write(filePath, json);
+      if (source.kind === "local") await bridge().flows.write(source.filePath, json);
+      else await bridge().cloudFlows.save(flow);
       setSavedJson(json);
       setNotice(validation.valid ? undefined : { kind: "error", text: "Saved, but the flow has validation problems." });
     } catch (err) {
@@ -177,7 +204,7 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [filePath, json, saving, validation.valid]);
+  }, [source, json, flow, saving, validation.valid]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -203,19 +230,19 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
   return (
     <EditorContext.Provider value={ctx}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-        <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${colors.bgCard}` }}>
+        <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${theme.border}`, background: theme.surface }}>
           <button style={buttonBase} onClick={close} title="Back to projects">
             ← Projects
           </button>
-          <strong style={{ fontSize: 15, marginLeft: 4 }}>
+          <strong style={{ fontSize: 15, marginLeft: 4, color: theme.title }}>
             {meta.name || "Untitled"}
-            {dirty ? <span title="Unsaved changes" style={{ color: colors.accent }}> •</span> : null}
+            {dirty ? <span title="Unsaved changes" style={{ color: theme.primary }}> •</span> : null}
           </strong>
           <span
-            style={{ fontSize: 11, opacity: 0.5, marginRight: "auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-            title={filePath}
+            style={{ fontSize: 11, color: theme.textMuted, marginRight: "auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            title={source.kind === "local" ? source.filePath : `Cloud flow · ${source.id}`}
           >
-            {filePath}
+            {source.kind === "local" ? source.filePath : `☁ Cloud · ${source.id}`}
           </span>
           <button style={{ ...buttonBase, opacity: dirty ? 1 : 0.6 }} onClick={() => void save()} disabled={saving} title="Save (⌘S)">
             {saving ? "Saving…" : "Save"}
@@ -239,8 +266,8 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
             style={{
               padding: "6px 12px",
               fontSize: 12,
-              background: notice.kind === "error" ? `${DANGER}22` : `${colors.accent}18`,
-              color: notice.kind === "error" ? DANGER : colors.secondary,
+              background: notice.kind === "error" ? alpha(DANGER, 13) : alpha(theme.primary, 10),
+              color: notice.kind === "error" ? DANGER : theme.text,
               display: "flex",
               justifyContent: "space-between",
             }}
@@ -271,13 +298,13 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
               nodesConnectable={!playing}
               nodesDraggable={!playing}
               deleteKeyCode={playing ? null : ["Backspace", "Delete"]}
-              colorMode="dark"
+              colorMode={colorMode}
               fitView
               fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
               proOptions={{ hideAttribution: true }}
-              style={{ background: colors.bgBlack }}
+              style={{ background: theme.canvasBg }}
             >
-              <Background color={colors.bgCard} gap={20} />
+              <Background color={theme.canvasGrid} gap={20} />
               <Controls>
                 <ControlButton onClick={autoLayout} disabled={playing || nodes.length === 0} title="Auto-layout" aria-label="Auto-layout">
                   <AutoLayoutIcon />
@@ -286,12 +313,12 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
               <MiniMap
                 pannable
                 zoomable
-                style={{ background: colors.bgGrey }}
-                nodeColor={(n) => (demo.frame ? DEMO_COLORS[demo.frame.nodes[n.id]?.state ?? "idle"] : colors.bgCard)}
+                style={{ background: theme.surface }}
+                nodeColor={(n) => (demo.frame ? DEMO_COLORS[demo.frame.nodes[n.id]?.state ?? "idle"] : theme.border)}
               />
             </ReactFlow>
             {nodes.length === 0 ? (
-              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", opacity: 0.5, textAlign: "center" }}>
+              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: theme.textMuted, textAlign: "center" }}>
                 Drag agents from the left onto the canvas.
                 <br />
                 Connect the right handle of a step to the left handle of the next one.

@@ -31,10 +31,14 @@ export interface UsageLimits {
 
 export type AgentStatus = "active" | "draft" | "disabled";
 
+/** Roles seeded into an empty role list. Roles are labels shown on flow nodes; behaviour lives in systemInstructions. */
+export const DEFAULT_AGENT_ROLES = ["planner", "researcher", "reviewer", "writer", "validator", "orchestrator"];
+
 export interface AgentDefinition {
   id: string;
   name: string;
   description?: string;
+  /** Short category label, reused across agents via AgentRoleStore (e.g. "reviewer"). */
   role: string;
   /** Lifecycle state shown in the UI; treated as "draft" when unset. */
   status?: AgentStatus;
@@ -110,6 +114,14 @@ export interface SkillStore {
   /** Creates or replaces the skill with this name. */
   save(skill: SkillDefinition): Promise<SkillDefinition>;
   delete(name: string): Promise<boolean>;
+}
+
+/** Reusable role labels offered as suggestions when editing agents. */
+export interface AgentRoleStore {
+  /** Role names sorted alphabetically. */
+  list(): Promise<string[]>;
+  /** Adds a role if no role with the same name (ignoring case) exists. */
+  add(name: string): Promise<void>;
 }
 
 export interface AgentRunContext {

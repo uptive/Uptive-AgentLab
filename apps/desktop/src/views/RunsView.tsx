@@ -477,7 +477,7 @@ function errorText(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
 }
 
-/** The demo flow plus every flow saved in the Flows view. */
+/** The demo flow plus every flow saved in the Flows view (files and MongoDB). */
 function useRunnableFlows(): FlowDefinition[] {
   const [flows, setFlows] = useState<FlowDefinition[]>([demoFlow]);
   useEffect(() => {
@@ -493,7 +493,11 @@ function useRunnableFlows(): FlowDefinition[] {
           // Unreadable flow file: the Flows view shows the problem.
         }
       }
-      if (!cancelled) setFlows([demoFlow, ...saved.filter((f) => f.id !== demoFlow.id)]);
+      // Flows saved to MongoDB; skipped when the database is unreachable.
+      const cloud = await window.agentlab.cloudFlows.list().catch(() => []);
+      for (const { createdAt: _c, updatedAt: _u, ...flow } of cloud) if (flow.nodes.length > 0) saved.push(flow);
+      const unique = new Map([demoFlow, ...saved].map((f) => [f.id, f]));
+      if (!cancelled) setFlows([...unique.values()]);
     })().catch((error) => console.warn("Could not load saved flows:", error));
     return () => {
       cancelled = true;
