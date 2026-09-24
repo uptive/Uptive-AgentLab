@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import type { McpServerInput, SkillDefinition } from "@agentlab/contracts";
-import type { ImportResult, McpServerEntry } from "../../electron/api.js";
+import type { ImportResult, LibraryMcpServer } from "../../electron/api.js";
 import { theme } from "../theme.js";
 import { Banner, Card, codeInput, dangerButton, ghostButton, input, Label, Pill, primaryButton, titleStyle } from "../library/ui.js";
 import { errorMessage, forgetServerTest, useLibrary, useServerTest } from "../library/useLibrary.js";
@@ -24,7 +24,7 @@ function describeImport(what: string, result: ImportResult): string {
 export function LibraryView() {
   const { skills, servers, loading, error, refresh } = useLibrary();
   const [notice, setNotice] = useState<{ text: string; tone: "error" | "info" }>();
-  const [editingServer, setEditingServer] = useState<McpServerEntry | "new">();
+  const [editingServer, setEditingServer] = useState<LibraryMcpServer | "new">();
   const [editingSkill, setEditingSkill] = useState<SkillDefinition | "new">();
 
   const act = async (work: () => Promise<string | void>) => {
@@ -158,7 +158,7 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
   return <p style={{ color: theme.textMuted, fontSize: 14, padding: "18px 0" }}>{children}</p>;
 }
 
-function ServerCard({ server, onEdit }: { server: McpServerEntry; onEdit: () => void }) {
+function ServerCard({ server, onEdit }: { server: LibraryMcpServer; onEdit: () => void }) {
   const [tested, setTested] = useState(false);
   const { result, testing, retest } = useServerTest(server.id, tested);
   const needsSecret = Boolean(server.secretRef) && !server.hasSecret;
@@ -210,7 +210,7 @@ function Dialog({ title, onClose, onSubmit, children, footer }: { title: string;
   );
 }
 
-function ServerDialog({ server, takenIds, onClose, onSaved }: { server?: McpServerEntry; takenIds: string[]; onClose: () => void; onSaved: (message: string) => void }) {
+function ServerDialog({ server, takenIds, onClose, onSaved }: { server?: LibraryMcpServer; takenIds: string[]; onClose: () => void; onSaved: (message: string) => void }) {
   const [name, setName] = useState(server?.name ?? "");
   const [kind, setKind] = useState<"http" | "stdio">(server?.transport.type ?? "http");
   const [url, setUrl] = useState(server?.transport.type === "http" ? server.transport.url : "");

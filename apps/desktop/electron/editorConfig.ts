@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { normalizeTags } from "@agentlab/flow-engine";
 import type { ProjectEntry, ProjectsState } from "./api.js";
 
 /**
@@ -104,6 +105,7 @@ export async function describeFlowFile(filePath: string, lastOpenedAt?: string):
       id: doc.id,
       name: doc.name,
       description: typeof doc.description === "string" ? doc.description : undefined,
+      tags: Array.isArray(doc.tags) ? normalizeTags(doc.tags.filter((t: unknown) => typeof t === "string")) : undefined,
       nodeCount: doc.nodes.length,
       modifiedAt,
       lastOpenedAt,

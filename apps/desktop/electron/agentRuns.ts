@@ -8,7 +8,7 @@ import { demoAgents } from "@agentlab/agent-runtime";
 import { createClaudeAgentRuntime, createClaudeCodeJsonClient, getClaudeAuthStatus, testMcpServer, type ClaudeAuthStatus } from "@agentlab/agent-runtime/claude";
 import { createMcpServerFileStore, createSkillFileStore, parseSkillFile } from "@agentlab/agent-runtime/library";
 import { createFlowEngine, dummyAgents } from "@agentlab/flow-engine";
-import { IPC, type ImportResult, type McpServerEntry, type StartRunRequest } from "./api.js";
+import { IPC, type ImportResult, type LibraryMcpServer, type StartRunRequest } from "./api.js";
 import { SecretStore } from "./secrets.js";
 
 // Runs flows for real with the Claude runtime, and manages the skill and MCP libraries.
@@ -176,7 +176,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
   });
 
   // ---- MCP servers ---------------------------------------------------------------------------
-  const toEntry = async (server: McpServerDefinition): Promise<McpServerEntry> => ({
+  const toEntry = async (server: McpServerDefinition): Promise<LibraryMcpServer> => ({
     ...server,
     hasSecret: server.secretRef ? await secrets.has(server.secretRef) : false,
   });

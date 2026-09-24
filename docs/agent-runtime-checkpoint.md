@@ -33,6 +33,10 @@ Main's changes that affected this branch, and how they were adapted:
 - Demo agents use main's `role` + `description` split, with Claude models.
 - **feat/runs** (John's live run graph and single-agent runs) is merged. Its `runLauncher` sends runs to the main process (Claude runtime) in the desktop app and keeps the mock runtime for a plain browser preview. Runs carry both branches' snapshot fields (`flow`, `agents`, `input`, `authSource`). Stop cancels the real run. The dialog lists cloud flows and has the read-only folder option.
 
+- **Henrik's Setup view and CLI runtime** (`@agentlab/agent-runtime/claude-cli`, `window.agentlab.runtime`) and **MCP screen** are merged alongside this work. Our MCP library IPC was renamed to `mcpServers:*` because both used `mcp:list`, and our library type is `LibraryMcpServer`, since `McpServerEntry` is Henrik's type for servers read from other apps' configs.
+- **Adam's Optimize backend** (`createModelClient`, `AGENT_BACKEND=cli|api`) replaces this branch's evaluator fallback.
+- **Needs a team decision:** there are now two agent runtimes. Flows run on the Agent SDK runtime (tools, MCP, skills, hooks, cost tracking); `createClaudeCliRuntime` wraps `claude -p` and is not used by flows. There are also two MCP screens: "Tools & skills" is the library agents use, "MCP" lists servers configured in other apps. Merging each pair into one is the obvious next step.
+
 ## How to run and test
 
 ```bash

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SkillDefinition } from "@agentlab/contracts";
-import type { McpServerEntry, McpTestResult } from "../../electron/api.js";
+import type { LibraryMcpServer, McpTestResult } from "../../electron/api.js";
 
 // Shared access to the skill and MCP server libraries (main process) for the Tools & skills view
 // and the agent editor.
@@ -12,7 +12,7 @@ export function errorMessage(error: unknown): string {
 
 export function useLibrary() {
   const [skills, setSkills] = useState<SkillDefinition[]>([]);
-  const [servers, setServers] = useState<McpServerEntry[]>([]);
+  const [servers, setServers] = useState<LibraryMcpServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
 

@@ -33,6 +33,11 @@ export interface FlowDefinition {
   id: string;
   name: string;
   description?: string;
+  /**
+   * Free-form labels for finding the flow later. Trimmed, non-empty and unique
+   * (case-insensitive); see `normalizeTags` in `@agentlab/flow-engine`.
+   */
+  tags?: string[];
   nodes: FlowNode[];
 }
 

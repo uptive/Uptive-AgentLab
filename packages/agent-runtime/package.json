@@ -10,7 +10,8 @@
     "./mongo": "./src/mongo.ts",
     "./files": "./src/fileAgentStore.ts",
     "./claude": "./src/claude/index.ts",
-    "./library": "./src/library.ts"
+    "./library": "./src/library.ts",
+    "./claude-cli": "./src/claudeCli.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

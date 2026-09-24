@@ -15,6 +15,7 @@ export interface FlowMeta {
   id: string;
   name: string;
   description?: string;
+  tags?: string[];
 }
 
 export const COLUMN_WIDTH = 300;
@@ -38,6 +39,7 @@ export function graphToFlow(meta: FlowMeta, nodes: AgentFlowNode[], edges: Edge[
     id: meta.id,
     name: meta.name,
     ...(meta.description ? { description: meta.description } : {}),
+    ...(meta.tags?.length ? { tags: meta.tags } : {}),
     nodes: nodes.map((n) => ({
       id: n.id,
       agentId: n.data.agentId,
@@ -54,7 +56,7 @@ export function flowToGraph(flow: FlowDefinition): { meta: FlowMeta; nodes: Agen
   const fallback = layoutPositions(flow);
   const nodeIds = new Set(flow.nodes.map((n) => n.id));
   return {
-    meta: { id: flow.id, name: flow.name, description: flow.description },
+    meta: { id: flow.id, name: flow.name, description: flow.description, tags: flow.tags },
     nodes: flow.nodes.map((n) => ({
       id: n.id,
       type: "agent",

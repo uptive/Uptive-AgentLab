@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { IpcRendererEvent } from "electron";
-import { IPC, type AgentDraftRequest, type AgentLabApi, type AgentSource } from "./api.js";
+import { IPC, type AgentDraftRequest, type AgentLabApi, type AgentSource, type ToolOutputStream } from "./api.js";
 import type { AgentInput, FlowDefinition, FlowStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 
@@ -44,6 +44,19 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
   return () => ipcRenderer.removeListener(channel, handler);
 }
 
+type OutputListener = (stream: ToolOutputStream, chunk: string) => void;
+
+/** Calls `invoke` with a fresh runId and routes that run's streamed output to `onOutput` until it settles. */
+function withOutput<T>(onOutput: OutputListener, invoke: (runId: string) => Promise<T>) {
+  const runId = crypto.randomUUID();
+  const listener = (_e: Electron.IpcRendererEvent, event: { runId: string; stream: ToolOutputStream; chunk: string }) => {
+    if (event.runId === runId) onOutput(event.stream, event.chunk);
+  };
+  ipcRenderer.on(IPC.toolOutput, listener);
+  const done = invoke(runId).finally(() => ipcRenderer.removeListener(IPC.toolOutput, listener));
+  return { runId, done };
+}
+
 const api: AgentLabApi = {
   projects: {
     list: () => ipcRenderer.invoke(IPC.listProjects),
@@ -59,6 +72,20 @@ const api: AgentLabApi = {
   agents,
   cloudFlows,
   roles: { list: () => ipcRenderer.invoke("roles:list") },
+  tools: {
+    list: () => ipcRenderer.invoke(IPC.listTools),
+    refresh: () => ipcRenderer.invoke(IPC.refreshTools),
+    run: (request) => ipcRenderer.invoke(IPC.runTool, request),
+    start: (request, onOutput) => {
+      const { runId, done } = withOutput(onOutput, (id) => ipcRenderer.invoke(IPC.runTool, { ...request, runId: id }));
+      return { runId, done, cancel: () => ipcRenderer.invoke(IPC.cancelTool, runId) };
+    },
+    install: (toolId, onOutput) => withOutput(onOutput, (id) => ipcRenderer.invoke(IPC.installTool, toolId, id)).done,
+    fixSetup: (toolId, onOutput) => withOutput(onOutput, (id) => ipcRenderer.invoke(IPC.fixToolSetup, toolId, id)).done,
+  },
+  runtime: {
+    run: (agent, input, context) => ipcRenderer.invoke(IPC.runAgent, agent, input, context),
+  },
   telemetry,
   runs: {
     start: (request) => ipcRenderer.invoke(IPC.startRun, request),
@@ -85,6 +112,7 @@ const api: AgentLabApi = {
     test: (id) => ipcRenderer.invoke(IPC.testMcpServer, id),
     importClaudeDesktop: () => ipcRenderer.invoke(IPC.importClaudeDesktop),
   },
+  mcp: { list: () => ipcRenderer.invoke(IPC.listMcp) },
   optimization: {
     generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),
   },

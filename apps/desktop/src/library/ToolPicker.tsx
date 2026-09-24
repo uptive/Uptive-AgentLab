@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { SkillDefinition, ToolRef } from "@agentlab/contracts";
 import { BUILTIN_TOOLS, FUNCTION_TOOLS, builtinToolName } from "@agentlab/agent-runtime";
-import type { McpServerEntry } from "../../electron/api.js";
+import type { LibraryMcpServer } from "../../electron/api.js";
 import { theme } from "../theme.js";
 import { Check, ghostButton, Pill } from "./ui.js";
 import { useServerTest } from "./useLibrary.js";
@@ -10,7 +10,7 @@ import { useServerTest } from "./useLibrary.js";
 
 const builtinRef = (name: string): ToolRef => ({ id: name, name, kind: "builtin" });
 
-function isKnown(ref: ToolRef, servers: McpServerEntry[]): boolean {
+function isKnown(ref: ToolRef, servers: LibraryMcpServer[]): boolean {
   if (builtinToolName(ref)) return true;
   if (ref.kind === "function") return FUNCTION_TOOLS.some((f) => f.id === ref.id);
   return ref.kind === "mcp" && Boolean(ref.serverId) && servers.some((s) => s.id === ref.serverId);
@@ -23,7 +23,7 @@ export function ToolPicker({
   onOpenLibrary,
 }: {
   tools: ToolRef[];
-  servers: McpServerEntry[];
+  servers: LibraryMcpServer[];
   onChange: (tools: ToolRef[]) => void;
   onOpenLibrary?: () => void;
 }) {
@@ -88,7 +88,7 @@ export function ToolPicker({
   );
 }
 
-function ServerTools({ server, tools, onChange }: { server: McpServerEntry; tools: ToolRef[]; onChange: (tools: ToolRef[]) => void }) {
+function ServerTools({ server, tools, onChange }: { server: LibraryMcpServer; tools: ToolRef[]; onChange: (tools: ToolRef[]) => void }) {
   const refs = tools.filter((t) => t.kind === "mcp" && t.serverId === server.id);
   const all = refs.some((t) => !t.toolName);
   const [expanded, setExpanded] = useState(refs.some((t) => t.toolName));
