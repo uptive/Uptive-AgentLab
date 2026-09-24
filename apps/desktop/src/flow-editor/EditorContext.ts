@@ -29,6 +29,7 @@ export const DEMO_COLORS = {
   waiting: WARNING,
   running: WARNING,
   done: colors.accent,
+  failed: DANGER,
 } as const;
 
 // Kept for places that just need an error colour.

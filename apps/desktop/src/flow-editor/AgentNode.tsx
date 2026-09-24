@@ -56,6 +56,7 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
         {id}
         {waitsFor > 1 ? ` · joins ${waitsFor}` : ""}
       </div>
+      {demoNode?.detail ? <div style={{ marginTop: 4, fontSize: 11, opacity: 0.85 }}>{demoNode.detail}</div> : null}
       {demoNode && demoNode.state !== "idle" ? (
         <div
           style={{
@@ -75,7 +76,7 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
 
 function DemoBadge({ frame }: { frame: DemoNodeFrame }) {
   const text =
-    frame.state === "waiting" ? `waiting ${frame.arrived}/${frame.total}` : frame.state === "done" ? "done" : frame.state === "running" ? "running" : "";
+    frame.state === "waiting" ? `waiting ${frame.arrived}/${frame.total}` : frame.state === "idle" ? "" : frame.state;
   if (!text) return null;
   return (
     <span
