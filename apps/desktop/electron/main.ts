@@ -4,13 +4,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MongoClient, ServerApiVersion } from "mongodb";
-import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
+import type { AgentInput, AgentRoleStore, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
-import { createMongoAgentStore } from "@agentlab/agent-runtime/mongo";
+import { createMongoAgentStore, createMongoRoleStore } from "@agentlab/agent-runtime/mongo";
 import { createAgentFileMirror, createMirroredAgentStore } from "@agentlab/agent-runtime/files";
-import { IPC, type ProjectEntry } from "./api.js";
+import { generateAgentDraft } from "./agentDraft.js";
+import { IPC, type AgentDraftRequest, type ProjectEntry } from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +40,7 @@ for (const envPath of [path.resolve(__dirname, "../.env"), path.resolve(__dirnam
 interface Stores {
   client: MongoClient;
   agents: AgentStore;
+  roles: AgentRoleStore;
   telemetry: AsyncTelemetryStore;
 }
 
@@ -55,7 +57,11 @@ async function connect(): Promise<Stores> {
   });
   await client.connect();
   const db = client.db(process.env.MONGODB_DB || "agentlab");
-  const [mongoAgents, telemetry] = await Promise.all([createMongoAgentStore(db), createMongoTelemetryStore(db)]);
+  const [mongoAgents, roles, telemetry] = await Promise.all([
+    createMongoAgentStore(db),
+    createMongoRoleStore(db),
+    createMongoTelemetryStore(db),
+  ]);
 
   // Agents are read from MongoDB and kept in two-way sync with JSON files in data/agents/ (which
   // can be committed). The sync runs now and again whenever the agent list is loaded.
@@ -64,7 +70,7 @@ async function connect(): Promise<Stores> {
   const synced = await agents.sync();
   if (synced) console.log(`[agents] synced ${mirror.dir}: ${synced.toDb} to database, ${synced.toFiles} to files`);
 
-  return { client, agents, telemetry };
+  return { client, agents, roles, telemetry };
 }
 
 function getStores(): Promise<Stores> {
@@ -152,11 +158,25 @@ function registerIpc(store: EditorConfigStore) {
 
   ipcMain.handle("agents:list", async () => (await getStores()).agents.list());
   ipcMain.handle("agents:get", async (_e, id: string) => (await getStores()).agents.get(id));
-  ipcMain.handle("agents:create", async (_e, input: AgentInput) => (await getStores()).agents.create(input));
-  ipcMain.handle("agents:update", async (_e, id: string, patch: Partial<AgentInput>) =>
-    (await getStores()).agents.update(id, patch),
-  );
+  // Saving an agent adds its role to the reusable role list.
+  ipcMain.handle("agents:create", async (_e, input: AgentInput) => {
+    const { agents, roles } = await getStores();
+    const agent = await agents.create(input);
+    await roles.add(agent.role);
+    return agent;
+  });
+  ipcMain.handle("agents:update", async (_e, id: string, patch: Partial<AgentInput>) => {
+    const { agents, roles } = await getStores();
+    const agent = await agents.update(id, patch);
+    if (patch.role !== undefined) await roles.add(agent.role);
+    return agent;
+  });
   ipcMain.handle("agents:delete", async (_e, id: string) => (await getStores()).agents.delete(id));
+  // Roles are read here rather than passed from the renderer, so the draft always sees the current list.
+  ipcMain.handle("agents:draft", async (_e, request: AgentDraftRequest) =>
+    generateAgentDraft(request, await (await getStores()).roles.list()),
+  );
+  ipcMain.handle("roles:list", async () => (await getStores()).roles.list());
 
   ipcMain.handle("telemetry:recordEvent", async (_e, event: TraceEvent) => (await getStores()).telemetry.recordEvent(event));
   ipcMain.handle("telemetry:listEvents", async (_e, runId: string) => (await getStores()).telemetry.listEvents(runId));
