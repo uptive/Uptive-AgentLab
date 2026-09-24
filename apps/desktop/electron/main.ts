@@ -10,6 +10,8 @@ import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
 import { createMongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
+import type { JsonRequest } from "@agentlab/optimization";
+import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
 import { IPC, type AgentListing, type AgentSource, type ProjectEntry, type SourcedAgent } from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
 
@@ -206,6 +208,10 @@ function registerIpc(store: EditorConfigStore) {
     const [store] = await agentStoreFor(id);
     return store.delete(id);
   });
+
+  // Model calls for LLM-backed evaluators run here so API credentials never reach the renderer.
+  const modelClient = createAnthropicModelClient();
+  ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
 
   ipcMain.handle("telemetry:recordEvent", async (_e, event: TraceEvent) => (await getStores()).telemetry.recordEvent(event));
   ipcMain.handle("telemetry:listEvents", async (_e, runId: string) => (await getStores()).telemetry.listEvents(runId));

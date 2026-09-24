@@ -1,10 +1,10 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AgentDefinition, FlowDefinition, Run, RunStatus, StepRun } from "@agentlab/contracts";
 import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
 import { demoAgents, findAgent } from "@agentlab/agent-runtime";
 import { computeFlowLayers, demoFlow, findFlow } from "@agentlab/flow-engine";
 import { theme } from "../theme.js";
-import { demoRun, demoTraceEvents } from "../demoRuns.js";
+import { demoRuns, demoTraceEvents } from "../demoRuns.js";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
   pending: theme.statusDraft,
@@ -363,20 +363,332 @@ function useRuns(): Run[] {
   );
 }
 
+// Fake-orchestrate a rerun by cloning a run with a new id, showing it as
+// "running" immediately, then flipping it to "completed" after a short delay.
+function buildRerun(source: Run): { running: Run; completed: Run } {
+  const now = Date.now();
+  const newRunId = `run-rerun-${now.toString(36)}`;
+  const running: Run = {
+    ...source,
+    id: newRunId,
+    status: "running",
+    startedAt: new Date(now).toISOString(),
+    completedAt: undefined,
+    steps: source.steps.map((step, i) => ({
+      ...step,
+      id: `${newRunId}-step-${i}`,
+      runId: newRunId,
+      status: "pending",
+      startedAt: undefined,
+      completedAt: undefined,
+      output: undefined,
+      error: undefined,
+    })),
+    totalUsage: undefined,
+  };
+  const completed: Run = {
+    ...running,
+    status: "completed",
+    completedAt: new Date(now + 2000).toISOString(),
+    steps: running.steps.map((step, i) => {
+      const original = source.steps[i];
+      return {
+        ...step,
+        status: "completed",
+        startedAt: new Date(now + i * 200).toISOString(),
+        completedAt: new Date(now + (i + 1) * 200).toISOString(),
+        output: original.output,
+        usage: original.usage,
+        toolCalls: original.toolCalls,
+      };
+    }),
+    totalUsage: source.totalUsage,
+  };
+  return { running, completed };
+}
+
+// Fake-orchestrate a fresh run built straight from a flow definition.
+function buildRunFromFlow(flow: FlowDefinition, input: unknown): { running: Run; completed: Run } {
+  const now = Date.now();
+  const newRunId = `run-${now.toString(36)}`;
+  const steps: StepRun[] = flow.nodes.map((node, i) => ({
+    id: `${newRunId}-step-${i}`,
+    runId: newRunId,
+    nodeId: node.id,
+    agentId: node.agentId,
+    status: "pending",
+    input,
+    toolCalls: [],
+  }));
+  const running: Run = {
+    id: newRunId,
+    flowId: flow.id,
+    status: "running",
+    startedAt: new Date(now).toISOString(),
+    steps,
+  };
+  const completed: Run = {
+    ...running,
+    status: "completed",
+    completedAt: new Date(now + 2000).toISOString(),
+    steps: steps.map((step, i) => ({
+      ...step,
+      status: "completed",
+      startedAt: new Date(now + i * 200).toISOString(),
+      completedAt: new Date(now + (i + 1) * 200).toISOString(),
+      output: { note: `Simulated output from ${step.agentId}` },
+      usage: { inputTokens: 800, outputTokens: 400, estimatedCostUsd: 0.012, latencyMs: 200 },
+    })),
+    totalUsage: {
+      inputTokens: 800 * steps.length,
+      outputTokens: 400 * steps.length,
+      estimatedCostUsd: 0.012 * steps.length,
+      latencyMs: 200 * steps.length,
+    },
+  };
+  return { running, completed };
+}
+
+const AVAILABLE_FLOWS: FlowDefinition[] = [demoFlow];
+
+function NewRunDialog({
+  onCancel,
+  onStart,
+}: {
+  onCancel: () => void;
+  onStart: (flow: FlowDefinition, input: unknown) => void;
+}) {
+  const [flowId, setFlowId] = useState<string>(AVAILABLE_FLOWS[0].id);
+  const [inputText, setInputText] = useState<string>(
+    JSON.stringify({ pullRequestId: 42, repository: "acme/checkout" }, null, 2),
+  );
+  const [error, setError] = useState<string | undefined>(undefined);
+  const flow = AVAILABLE_FLOWS.find((f) => f.id === flowId) ?? AVAILABLE_FLOWS[0];
+
+  const submit = () => {
+    let parsed: unknown = undefined;
+    const trimmed = inputText.trim();
+    if (trimmed.length > 0) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        setError("Input must be valid JSON (or empty).");
+        return;
+      }
+    }
+    onStart(flow, parsed);
+  };
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: theme.backdrop,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: theme.surface,
+          border: `1px solid ${theme.border}`,
+          borderRadius: 12,
+          padding: 24,
+          width: 520,
+          maxWidth: "90vw",
+          color: theme.text,
+          boxShadow: theme.drawerShadow,
+        }}
+      >
+        <h2 style={{ margin: 0, marginBottom: 4 }}>Start execution</h2>
+        <p style={{ color: theme.textMuted, marginTop: 0, marginBottom: 20, fontSize: 13 }}>
+          Pick a flow and provide the input payload. The run appears in the list immediately.
+        </p>
+
+        <label style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>
+          Flow
+        </label>
+        <select
+          value={flowId}
+          onChange={(e) => setFlowId(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "8px 10px",
+            marginBottom: 16,
+            background: theme.codeBg,
+            color: theme.text,
+            border: `1px solid ${theme.border}`,
+            borderRadius: 6,
+            fontSize: 14,
+          }}
+        >
+          {AVAILABLE_FLOWS.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+        <div style={{ fontSize: 12, color: theme.textMuted, marginTop: -12, marginBottom: 16 }}>
+          {flow.description}
+        </div>
+
+        <label style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>
+          Input (JSON)
+        </label>
+        <textarea
+          value={inputText}
+          onChange={(e) => {
+            setInputText(e.target.value);
+            setError(undefined);
+          }}
+          rows={7}
+          style={{
+            width: "100%",
+            padding: 10,
+            background: theme.codeBg,
+            color: theme.text,
+            border: `1px solid ${error ? theme.danger : theme.border}`,
+            borderRadius: 6,
+            fontFamily: theme.fontMono,
+            fontSize: 12,
+            resize: "vertical",
+            boxSizing: "border-box",
+          }}
+        />
+        {error && (
+          <div style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{error}</div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 6,
+              border: `1px solid ${theme.border}`,
+              background: "transparent",
+              color: theme.text,
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 6,
+              border: `1px solid ${theme.primary}`,
+              background: theme.primary,
+              color: theme.onPrimary,
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            ▶ Run
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RunsView() {
   const store = getTelemetryStore();
   const runs = useRuns();
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
+  const [newRunOpen, setNewRunOpen] = useState(false);
+
+  // Track pending rerun completions so Stop can cancel them.
+  const rerunTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const timers = rerunTimers.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    };
+  }, []);
+
+  const handleRerun = useCallback(
+    (run: Run) => {
+      const { running, completed } = buildRerun(run);
+      store.saveRun(running);
+      const timer = setTimeout(() => {
+        rerunTimers.current.delete(running.id);
+        store.saveRun(completed);
+      }, 2000);
+      rerunTimers.current.set(running.id, timer);
+    },
+    [store],
+  );
+
+  const handleStop = useCallback(
+    (run: Run) => {
+      const pending = rerunTimers.current.get(run.id);
+      if (pending) {
+        clearTimeout(pending);
+        rerunTimers.current.delete(run.id);
+      }
+      const now = new Date().toISOString();
+      const stopped: Run = {
+        ...run,
+        status: "failed",
+        completedAt: now,
+        steps: run.steps.map((step) =>
+          step.status === "running" || step.status === "pending"
+            ? {
+                ...step,
+                status: "failed",
+                completedAt: step.completedAt ?? now,
+                error: step.error ?? "Cancelled by user",
+              }
+            : step,
+        ),
+      };
+      store.saveRun(stopped);
+    },
+    [store],
+  );
+
+  const handleStart = useCallback(
+    (flow: FlowDefinition, input: unknown) => {
+      const { running, completed } = buildRunFromFlow(flow, input);
+      store.saveRun(running);
+      const timer = setTimeout(() => {
+        rerunTimers.current.delete(running.id);
+        store.saveRun(completed);
+      }, 2000);
+      rerunTimers.current.set(running.id, timer);
+      setNewRunOpen(false);
+    },
+    [store],
+  );
 
   useEffect(() => {
     let cancelled = false;
     void store.hydrate().then(() => {
       if (cancelled) return;
-      if (store.listRuns().length === 0) {
-        // Seed with the workshop's demo scenario until Flow Orchestration produces real runs.
-        for (const event of demoTraceEvents) store.recordEvent(event);
-        store.saveRun(demoRun);
+      // Seed missing demo runs idempotently so a store that already has some
+      // runs (from Mongo or a previous session) still gets any new demo ids.
+      const existing = new Set(store.listRuns().map((run) => run.id));
+      const missing = demoRuns.filter((run) => !existing.has(run.id));
+      if (missing.length > 0) {
+        const missingIds = new Set(missing.map((run) => run.id));
+        for (const event of demoTraceEvents) {
+          if (missingIds.has(event.runId)) store.recordEvent(event);
+        }
+        for (const run of missing) store.saveRun(run);
       }
       setHydrated(true);
     });
@@ -392,25 +704,65 @@ export function RunsView() {
 
   return (
     <div>
-      <h1 style={{ margin: 0 }}>Runs</h1>
-      <p style={{ color: theme.textMuted, marginTop: 4 }}>
-        Recent flow executions. Click a run to drill into its trace and agents.
-      </p>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 16,
+        }}
+      >
+        <div>
+          <h1 style={{ margin: 0 }}>Runs</h1>
+          <p style={{ color: theme.textMuted, marginTop: 4 }}>
+            Recent flow executions. Click a run to drill into its trace and agents.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setNewRunOpen(true)}
+          style={{
+            padding: "10px 18px",
+            borderRadius: 8,
+            border: `1px solid ${theme.primary}`,
+            background: theme.primary,
+            color: theme.onPrimary,
+            cursor: "pointer",
+            fontSize: 14,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+        >
+          ▶ Start execution
+        </button>
+      </div>
       {!hydrated ? (
         <p style={{ color: theme.textMuted }}>Loading…</p>
       ) : runs.length === 0 ? (
-        <p>No runs yet.</p>
-      ) : (
+        <p style={{ color: theme.textMuted, marginTop: 24 }}>
+          No runs yet. Click <strong>Start execution</strong> to kick one off.
+        </p>
+      ) : (  
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
-          {runs.map((run) => {
+          {[...runs]
+            .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+            .map((run) => {
             const summary = summarizeRun(run, store.listEvents(run.id));
             return (
-              <button
+              <div
                 key={run.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelectedRunId(run.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedRunId(run.id);
+                  }
+                }}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 110px 90px 110px 100px",
+                  gridTemplateColumns: "1fr 110px 90px 110px 100px 90px",
                   alignItems: "center",
                   gap: 12,
                   textAlign: "left",
@@ -434,10 +786,56 @@ export function RunsView() {
                   {(summary.inputTokens + summary.outputTokens).toLocaleString()} tok
                 </span>
                 <span style={{ fontSize: 13 }}>{formatUsd(summary.estimatedCostUsd)}</span>
-              </button>
+                {run.status === "running" ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStop(run);
+                    }}
+                    title="Stop this run"
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      border: `1px solid ${theme.danger}`,
+                      background: theme.codeBg,
+                      color: theme.danger,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    ◼ Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRerun(run);
+                    }}
+                    title="Rerun this flow"
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.codeBg,
+                      color: theme.primary,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    ↻ Rerun
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>
+      )}
+      {newRunOpen && (
+        <NewRunDialog onCancel={() => setNewRunOpen(false)} onStart={handleStart} />
       )}
     </div>
   );

@@ -42,6 +42,9 @@ const api: AgentLabApi = {
   },
   agents,
   telemetry,
+  optimization: {
+    generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),
+  },
 };
 
 contextBridge.exposeInMainWorld("agentlab", api);
