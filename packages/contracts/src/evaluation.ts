@@ -19,7 +19,8 @@ export type ChangeType =
   | "set-dependencies"
   | "add-node"
   | "merge-nodes"
-  | "edit-role";
+  | "edit-role"
+  | "edit-input-mapping";
 
 /** A concrete, machine-readable edit to the recommendation's target. `null` means absent/removed. */
 export interface RecommendationChange {
@@ -113,8 +114,10 @@ export interface EvaluationResult {
   flowId: string;
   createdAt: string;
   evaluatorIds: string[];
-  /** Evaluators that could not run (e.g. no model access). Their categories are missing from the result. */
+  /** Evaluators that could not run at all. Their categories are missing from the result. */
   skippedEvaluators: SkippedEvaluator[];
+  /** Model-backed evaluators whose model call failed, so their built-in rules ran instead. */
+  fallbackEvaluators: SkippedEvaluator[];
   recommendations: Recommendation[];
   summary: EvaluationSummary;
 }

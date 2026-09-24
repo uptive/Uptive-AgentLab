@@ -1,15 +1,14 @@
 // Node-only (Electron main, scripts, tests): imports the Anthropic SDK. Never import this from the
 // renderer; it is exposed separately as `@agentlab/optimization/anthropic`.
 import Anthropic from "@anthropic-ai/sdk";
+import { DEFAULT_EVALUATOR_MODEL } from "../evaluatorModels.js";
 import type { JsonRequest, ModelClient } from "../types.js";
-
-export const EVALUATOR_MODEL = "claude-opus-5";
 
 export function createAnthropicModelClient(options: { model?: string } = {}): ModelClient {
   let client: Anthropic | undefined;
 
   return {
-    async generateJson({ system, prompt, schema }: JsonRequest) {
+    async generateJson({ system, prompt, schema, model = options.model ?? process.env.AGENT_MODEL ?? DEFAULT_EVALUATOR_MODEL }: JsonRequest) {
       try {
         // Resolves credentials from ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / `ant auth login` profile.
         client ??= new Anthropic();
@@ -19,11 +18,12 @@ export function createAnthropicModelClient(options: { model?: string } = {}): Mo
 
       let response;
       try {
+        // Server-side refusal fallbacks are only offered for the Opus/Fable tier.
+        const withFallbacks = /^claude-(opus-5|fable)/.test(model);
         response = await client.beta.messages.create({
-          model: options.model ?? EVALUATOR_MODEL,
+          model,
           max_tokens: 16000,
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
+          ...(withFallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
           thinking: { type: "adaptive" },
           output_config: { effort: "medium", format: { type: "json_schema", schema } },
           system,

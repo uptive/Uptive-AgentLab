@@ -6,6 +6,7 @@ const EVALUATOR_ID = "quality";
 const MIN_INSTRUCTION_WORDS = 15;
 const MIN_TASK_WORDS = 10;
 
+/** Rule-based: size/shape heuristics. Also the fallback for the LLM-backed evaluator. */
 export const qualityEvaluator: Evaluator = {
   id: EVALUATOR_ID,
   name: "Quality",
@@ -23,7 +24,7 @@ export const qualityEvaluator: Evaluator = {
 };
 
 /** Walks `<nodeId>.output.<path>` against the recorded run. Returns undefined when the source isn't a node output. */
-function resolveOutputPath(input: EvaluationInput, source: string): { nodeId: string; path: string[]; value: unknown } | undefined {
+export function resolveOutputPath(input: EvaluationInput, source: string): { nodeId: string; path: string[]; value: unknown } | undefined {
   const match = /^([^.$]+)\.output(?:\.(.+))?$/.exec(source);
   if (!match) return undefined;
   const [, nodeId, rest] = match;
@@ -47,7 +48,7 @@ function schemaForField(input: EvaluationInput, field: string): { schema: unknow
 }
 
 /** A downstream input mapping points at a field the upstream step never produced. */
-function brokenHandoffRecommendations(input: EvaluationInput): Recommendation[] {
+export function brokenHandoffRecommendations(input: EvaluationInput): Recommendation[] {
   const recommendations: Recommendation[] = [];
 
   for (const consumer of input.flow.nodes) {
