@@ -10,12 +10,7 @@ function stripId({ _id, ...rest }: AgentDoc): AgentDefinition {
   return rest;
 }
 
-export interface MongoAgentStore extends AgentStore {
-  /** Stores an agent exactly as given, keeping its id and timestamps (used when syncing from files). */
-  put(agent: AgentDefinition): Promise<void>;
-}
-
-export async function createMongoAgentStore(db: Db): Promise<MongoAgentStore> {
+export async function createMongoAgentStore(db: Db): Promise<AgentStore> {
   const agents = db.collection<AgentDoc>("agents");
   await agents.createIndex({ name: 1 });
 
@@ -57,9 +52,6 @@ export async function createMongoAgentStore(db: Db): Promise<MongoAgentStore> {
     async delete(id) {
       const result = await agents.deleteOne({ _id: id });
       return result.deletedCount === 1;
-    },
-    async put(agent) {
-      await agents.replaceOne({ _id: agent.id }, { ...agent, tools: agent.tools ?? [] }, { upsert: true });
     },
   };
 }
