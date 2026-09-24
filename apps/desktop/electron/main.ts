@@ -26,6 +26,7 @@ import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
 import { generateAgentDraft } from "./agentDraft.js";
 import { IPC, type AgentDraftRequest, type AgentListing, type AgentSource, type ProjectEntry, type SourcedAgent } from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
+import { listMcpSources } from "./mcpConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -255,6 +256,10 @@ function registerIpc(store: EditorConfigStore) {
   // Roles are read here rather than passed from the renderer, so the draft always sees the current list.
   ipcMain.handle("agents:draft", async (_e, request: AgentDraftRequest) => generateAgentDraft(request, await listRoles()));
   ipcMain.handle("roles:list", () => listRoles());
+
+  ipcMain.handle(IPC.listMcp, () =>
+    listMcpSources({ appDataDir: app.getPath("appData"), repoRoot: path.resolve(__dirname, "../../..") }),
+  );
 
   // Model calls for LLM-backed evaluators run here so API credentials never reach the renderer.
   const modelClient = createAnthropicModelClient();

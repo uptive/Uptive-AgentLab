@@ -3,6 +3,7 @@ import { AgentsView } from "./views/AgentsView.js";
 import { FlowsView } from "./views/FlowsView.js";
 import { RunsView } from "./views/RunsView.js";
 import { OptimizeView } from "./views/OptimizeView.js";
+import { McpView } from "./views/McpView.js";
 import { theme, useTheme } from "./theme.js";
 
 const TABS = [
@@ -10,6 +11,7 @@ const TABS = [
   { id: "flows", label: "Flows", view: FlowsView, fullBleed: true },
   { id: "runs", label: "Runs", view: RunsView, fullBleed: false },
   { id: "optimize", label: "Optimize", view: OptimizeView, fullBleed: false },
+  { id: "mcp", label: "MCP", view: McpView, fullBleed: false },
 ] as const;
 
 export function App() {

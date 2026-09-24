@@ -52,6 +52,7 @@ const api: AgentLabApi = {
   cloudFlows,
   roles: { list: () => ipcRenderer.invoke("roles:list") },
   telemetry,
+  mcp: { list: () => ipcRenderer.invoke(IPC.listMcp) },
   optimization: {
     generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),
   },

@@ -71,6 +71,33 @@ export interface AgentDraft {
   outputSchema: unknown;
 }
 
+export type McpSourceKind = "claude-desktop" | "claude-code" | "plugin" | "project" | "cursor";
+
+/** One configured MCP server. Env and header values are never exposed, only their names. */
+export interface McpServerEntry {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  url?: string;
+  envKeys: string[];
+  headerKeys: string[];
+  disabled?: boolean;
+  /** Set for Claude Desktop extensions. */
+  version?: string;
+}
+
+/** A config file (or folder) that declares MCP servers. */
+export interface McpSource {
+  kind: McpSourceKind;
+  label: string;
+  path: string;
+  /** "missing" = file does not exist, "invalid" = unreadable or not JSON. */
+  status: "ok" | "missing" | "invalid";
+  error?: string;
+  servers: McpServerEntry[];
+}
+
 export interface AgentLabApi {
   projects: {
     list(): Promise<ProjectsState>;
@@ -103,6 +130,10 @@ export interface AgentLabApi {
     load(): Promise<PersistedState | null>;
     save(state: PersistedState): Promise<void>;
   };
+  mcp: {
+    /** MCP servers configured for Claude Desktop, Claude Code, plugins, this repo and Cursor. Read-only. */
+    list(): Promise<McpSource[]>;
+  };
   /** Model calls for LLM-backed evaluators; run in the main process so API credentials stay there. */
   optimization: {
     generateJson(request: JsonRequest): Promise<unknown>;
@@ -122,4 +153,5 @@ export const IPC = {
   saveCloudFlow: "cloudFlows:save",
   deleteCloudFlow: "cloudFlows:delete",
   generateJson: "optimization:generate-json",
+  listMcp: "mcp:list",
 } as const;
