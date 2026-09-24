@@ -5,3 +5,5 @@ export const runtime: AgentRuntime = {
     throw new Error(`Not implemented: run(${agent.id}) for run ${context.runId}, input: ${JSON.stringify(input)}`);
   },
 };
+
+export * from "./demo.js";

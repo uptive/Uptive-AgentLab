@@ -9,3 +9,5 @@ export const engine: FlowEngine = {
     throw new Error(`Not implemented: execute(${flow.id}), input: ${JSON.stringify(input)}`);
   },
 };
+
+export * from "./demo.js";
