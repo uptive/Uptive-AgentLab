@@ -1,6 +1,17 @@
 /** Shared contract for the preload bridge (`window.agentlab`). Types only + channel names. */
 
-import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
+import type {
+  AgentDefinition,
+  AgentInput,
+  AgentStore,
+  FlowDefinition,
+  McpServerDefinition,
+  McpServerInput,
+  Run,
+  SkillDefinition,
+  TraceEvent,
+} from "@agentlab/contracts";
+import type { ClaudeAuthStatus, McpTestResult } from "@agentlab/agent-runtime/claude";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import type { JsonRequest } from "@agentlab/optimization";
 
@@ -23,6 +34,25 @@ export interface ProjectsState {
   flowsDirectory: string;
   flows: ProjectEntry[];
 }
+
+export interface StartRunRequest {
+  flow: FlowDefinition;
+  input: unknown;
+  /** A folder agents may read (e.g. the repository a review flow looks at). */
+  folder?: string;
+}
+
+export interface McpServerEntry extends McpServerDefinition {
+  /** Whether the secret this server references is stored on this computer. */
+  hasSecret: boolean;
+}
+
+export interface ImportResult {
+  imported: string[];
+  skipped: { name: string; reason: string }[];
+}
+
+export type { ClaudeAuthStatus, McpTestResult };
 
 export interface AgentLabApi {
   projects: {
@@ -47,6 +77,38 @@ export interface AgentLabApi {
     load(): Promise<PersistedState | null>;
     save(state: PersistedState): Promise<void>;
   };
+  /** Real flow runs, executed by the Claude runtime in the main process. */
+  runs: {
+    /** Resolves as soon as the run has started. Progress arrives through onUpdate/onEvent. */
+    start(request: StartRunRequest): Promise<{ runId: string }>;
+    cancel(runId: string): Promise<void>;
+    /** Subscribes to run snapshots; returns an unsubscribe function. */
+    onUpdate(listener: (run: Run) => void): () => void;
+    onEvent(listener: (event: TraceEvent) => void): () => void;
+    /** Opens a folder picker; undefined when cancelled. */
+    pickFolder(): Promise<string | undefined>;
+  };
+  claude: {
+    authStatus(refresh?: boolean): Promise<ClaudeAuthStatus>;
+    /** Agents that are always available to flows, in addition to saved agents. */
+    builtinAgents(): Promise<AgentDefinition[]>;
+  };
+  skills: {
+    list(): Promise<SkillDefinition[]>;
+    save(skill: SkillDefinition): Promise<SkillDefinition>;
+    delete(name: string): Promise<boolean>;
+    reveal(name: string): Promise<void>;
+    /** Lets the user pick skill folders (each with a SKILL.md) and copies them into the library. */
+    import(): Promise<ImportResult>;
+  };
+  mcpServers: {
+    list(): Promise<McpServerEntry[]>;
+    /** `secret`: a new value to store, null to remove the stored one, undefined to keep it. */
+    save(input: McpServerInput, secret?: string | null): Promise<McpServerEntry>;
+    delete(id: string): Promise<boolean>;
+    test(id: string): Promise<McpTestResult>;
+    importClaudeDesktop(): Promise<ImportResult>;
+  };
   /** Model calls for LLM-backed evaluators; run in the main process so API credentials stay there. */
   optimization: {
     generateJson(request: JsonRequest): Promise<unknown>;
@@ -62,4 +124,21 @@ export const IPC = {
   readFlow: "flows:read",
   writeFlow: "flows:write",
   generateJson: "optimization:generate-json",
+  startRun: "runs:start",
+  cancelRun: "runs:cancel",
+  runUpdate: "runs:update",
+  runEvent: "runs:event",
+  pickFolder: "runs:pick-folder",
+  authStatus: "claude:auth-status",
+  builtinAgents: "claude:builtin-agents",
+  listSkills: "skills:list",
+  saveSkill: "skills:save",
+  deleteSkill: "skills:delete",
+  revealSkill: "skills:reveal",
+  importSkills: "skills:import",
+  listMcpServers: "mcp:list",
+  saveMcpServer: "mcp:save",
+  deleteMcpServer: "mcp:delete",
+  testMcpServer: "mcp:test",
+  importClaudeDesktop: "mcp:import-claude-desktop",
 } as const;

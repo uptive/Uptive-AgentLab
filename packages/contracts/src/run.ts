@@ -1,5 +1,6 @@
 import type { Usage } from "./usage.js";
-import type { ToolCall } from "./agent.js";
+import type { AgentDefinition, ToolCall } from "./agent.js";
+import type { FlowDefinition } from "./flow.js";
 
 export type StepStatus = "pending" | "running" | "completed" | "failed";
 
@@ -28,6 +29,12 @@ export interface Run {
   completedAt?: string;
   steps: StepRun[];
   totalUsage?: Usage;
+  /**
+   * Snapshots of the flow and agents as they were when the run executed, so a run stays
+   * understandable (and analyzable) after the flow or its agents are edited.
+   */
+  flow?: FlowDefinition;
+  agents?: AgentDefinition[];
   /** What paid for the model calls: a claude.ai subscription login, or an API key. */
   authSource?: AuthSource;
 }

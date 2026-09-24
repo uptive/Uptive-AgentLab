@@ -14,10 +14,16 @@ import type { JsonRequest } from "@agentlab/optimization";
 import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
 import { IPC, type ProjectEntry } from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
+import { registerAgentRunIpc } from "./agentRuns.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+
+// Opt-in DevTools protocol port for driving the app from scripts in development.
+if (process.env.AGENTLAB_DEBUG_PORT && !app.isPackaged) {
+  app.commandLine.appendSwitch("remote-debugging-port", process.env.AGENTLAB_DEBUG_PORT);
+}
 
 // Minimal KEY=VALUE parser. process.loadEnvFile() crashes Electron 33's main process (SIGTRAP).
 function loadEnvFile(envPath: string) {
@@ -160,8 +166,16 @@ function registerIpc(store: EditorConfigStore) {
   );
   ipcMain.handle("agents:delete", async (_e, id: string) => (await getStores()).agents.delete(id));
 
+  // Real flow runs plus the skill and MCP libraries. Library data sits next to data/agents in
+  // development (so it can be committed) and in the app's user data folder when packaged.
+  const { jsonClient } = registerAgentRunIpc({
+    getAgentStore: async () => (await getStores()).agents,
+    dataDir: app.isPackaged ? app.getPath("userData") : path.resolve(__dirname, "../../../data"),
+  });
+
   // Model calls for LLM-backed evaluators run here so API credentials never reach the renderer.
-  const modelClient = createAnthropicModelClient();
+  // With an API key they go through the API; otherwise through the Claude Code login (subscription).
+  const modelClient = process.env.ANTHROPIC_API_KEY ? createAnthropicModelClient() : jsonClient;
   ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
 
   ipcMain.handle("telemetry:recordEvent", async (_e, event: TraceEvent) => (await getStores()).telemetry.recordEvent(event));

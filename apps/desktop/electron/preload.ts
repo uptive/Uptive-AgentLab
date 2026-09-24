@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type AgentLabApi } from "./api.js";
+import type { IpcRendererEvent } from "electron";
 import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 
@@ -27,6 +28,13 @@ const telemetry: AsyncTelemetryStore & {
   save: (state: PersistedState) => ipcRenderer.invoke("telemetry:save", state),
 };
 
+/** Subscribes to a main-process push channel; returns the unsubscribe function. */
+function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
+  const handler = (_event: IpcRendererEvent, payload: T) => listener(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 const api: AgentLabApi = {
   projects: {
     list: () => ipcRenderer.invoke(IPC.listProjects),
@@ -41,6 +49,31 @@ const api: AgentLabApi = {
   },
   agents,
   telemetry,
+  runs: {
+    start: (request) => ipcRenderer.invoke(IPC.startRun, request),
+    cancel: (runId) => ipcRenderer.invoke(IPC.cancelRun, runId),
+    onUpdate: (listener) => subscribe(IPC.runUpdate, listener),
+    onEvent: (listener) => subscribe(IPC.runEvent, listener),
+    pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
+  },
+  claude: {
+    authStatus: (refresh) => ipcRenderer.invoke(IPC.authStatus, refresh),
+    builtinAgents: () => ipcRenderer.invoke(IPC.builtinAgents),
+  },
+  skills: {
+    list: () => ipcRenderer.invoke(IPC.listSkills),
+    save: (skill) => ipcRenderer.invoke(IPC.saveSkill, skill),
+    delete: (name) => ipcRenderer.invoke(IPC.deleteSkill, name),
+    reveal: (name) => ipcRenderer.invoke(IPC.revealSkill, name),
+    import: () => ipcRenderer.invoke(IPC.importSkills),
+  },
+  mcpServers: {
+    list: () => ipcRenderer.invoke(IPC.listMcpServers),
+    save: (input, secret) => ipcRenderer.invoke(IPC.saveMcpServer, input, secret),
+    delete: (id) => ipcRenderer.invoke(IPC.deleteMcpServer, id),
+    test: (id) => ipcRenderer.invoke(IPC.testMcpServer, id),
+    importClaudeDesktop: () => ipcRenderer.invoke(IPC.importClaudeDesktop),
+  },
   optimization: {
     generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),
   },

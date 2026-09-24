@@ -8,6 +8,7 @@ import type { TraceEvent } from "@agentlab/contracts";
 import { createFlowEngine, demoFlow } from "@agentlab/flow-engine";
 import { createClaudeAgentRuntime } from "../src/claude/runtime.js";
 import { createSkillFileStore } from "../src/library.js";
+import { createClaudeCodeJsonClient, getClaudeAuthStatus, testMcpServer } from "../src/claude/inspect.js";
 import { demoAgents, findAgent } from "../src/demo.js";
 
 const DIFF = `diff --git a/src/users.ts b/src/users.ts
@@ -69,5 +70,46 @@ describe.skipIf(!process.env.AGENTLAB_E2E)("e2e: real Claude", () => {
     expect(toolNames).toContain("mcp__agentlab__current_time");
     expect(toolNames).toContain("Skill");
     expect(String(result.output)).toMatch(/ahoy/i);
+  }, 300_000);
+
+  it("reports auth, tests a public MCP server, uses its tools, and returns JSON", async () => {
+    const auth = await getClaudeAuthStatus();
+    console.log("auth", auth);
+    expect(auth.source).not.toBe("unknown");
+
+    const deepwiki = { id: "deepwiki", name: "DeepWiki", transport: { type: "http" as const, url: "https://mcp.deepwiki.com/mcp" } };
+    const test = await testMcpServer(deepwiki, undefined);
+    console.log("mcp", test.status, test.tools.map((t) => t.name));
+    expect(test.status).toBe("connected");
+    expect(test.tools.map((t) => t.name)).toContain("read_wiki_structure");
+
+    const root = await mkdtemp(path.join(tmpdir(), "agentlab-e2e-"));
+    const events: TraceEvent[] = [];
+    const runtime = createClaudeAgentRuntime({
+      skillsDir: path.join(root, "skills"),
+      workspaceRoot: path.join(root, "ws"),
+      resolveMcpServer: async (id) => (id === "deepwiki" ? deepwiki : undefined),
+      onEvent: (e) => events.push(e),
+    });
+    const result = await runtime.run(
+      {
+        id: "wiki", name: "Wiki", role: "researcher", model: "claude-sonnet-5",
+        systemInstructions: "Answer using the DeepWiki tools. Be brief.",
+        tools: [{ id: "deepwiki-structure", name: "Wiki structure", kind: "mcp", serverId: "deepwiki", toolName: "read_wiki_structure" }],
+      },
+      "List three top-level documentation topics of the GitHub repo facebook/react.",
+      { runId: "e2e", stepRunId: "wiki" },
+    );
+    const toolNames = events.filter((e) => e.type === "tool_call").map((e) => (e.data as { toolId: string }).toolId);
+    console.log(result.status, result.error ?? "", toolNames);
+    expect(result.status).toBe("completed");
+    expect(toolNames).toContain("mcp__deepwiki__read_wiki_structure");
+
+    const json = await createClaudeCodeJsonClient({ model: "claude-haiku-4-5" }).generateJson({
+      system: "Return the requested JSON.",
+      prompt: "Give me the number seven.",
+      schema: { type: "object", properties: { n: { type: "number" } }, required: ["n"], additionalProperties: false },
+    });
+    expect(json).toEqual({ n: 7 });
   }, 300_000);
 });

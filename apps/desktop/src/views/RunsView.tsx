@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AgentDefinition, FlowDefinition, Run, RunStatus, StepRun } from "@agentlab/contracts";
 import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
-import { demoAgents, findAgent } from "@agentlab/agent-runtime";
-import { computeFlowLayers, demoFlow, findFlow } from "@agentlab/flow-engine";
+import { computeFlowLayers, demoFlow } from "@agentlab/flow-engine";
 import { theme } from "../theme.js";
 import { demoRuns, demoTraceEvents } from "../demoRuns.js";
+import { agentOf, canRunForReal, cancelRun, connectLiveRuns, flowOf, startRun } from "../liveRuns.js";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
   pending: theme.statusDraft,
@@ -236,14 +236,14 @@ function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
   const [selectedStepId, setSelectedStepId] = useState<string | undefined>(undefined);
   const events = store.listEvents(run.id);
   const summary = summarizeRun(run, events);
-  const flow: FlowDefinition = findFlow(run.flowId) ?? demoFlow;
+  const flow: FlowDefinition = flowOf(run);
   const layers = computeFlowLayers(flow);
   const selectedStep = run.steps.find((step) => step.id === selectedStepId);
-  const selectedAgent = selectedStep ? findAgent(selectedStep.agentId, demoAgents) : undefined;
+  const selectedAgent = selectedStep ? agentOf(run, selectedStep.agentId) : undefined;
   const totalTokens = summary.inputTokens + summary.outputTokens;
 
   const stepByNodeId = new Map(run.steps.map((step) => [step.nodeId, step]));
-  const agentsInRun = run.steps.map((step) => findAgent(step.agentId, demoAgents) ?? undefined);
+  const agentsInRun = run.steps.map((step) => agentOf(run, step.agentId) ?? undefined);
   const agentNames = Array.from(
     new Set(agentsInRun.map((agent, index) => agent?.name ?? run.steps[index].agentId)),
   );
@@ -257,7 +257,7 @@ function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
         .map((depId) => {
           const parentStep = stepByNodeId.get(depId);
           if (!parentStep) return undefined;
-          const parentAgent = findAgent(parentStep.agentId, demoAgents);
+          const parentAgent = agentOf(run, parentStep.agentId);
           return { agentName: parentAgent?.name ?? parentStep.agentId, output: parentStep.output };
         })
         .filter((entry): entry is { agentName: string; output: unknown } => entry !== undefined)
@@ -279,6 +279,7 @@ function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
       </div>
       <p style={{ color: theme.textMuted, marginTop: 4, fontSize: 12 }}>
         Started {formatRelative(run.startedAt)} · {run.id}
+        {run.authSource ? ` · paid by ${run.authSource === "subscription" ? "Claude subscription" : run.authSource === "api-key" ? "API key" : "unknown"}` : ""}
       </p>
 
       <div style={{ display: "flex", gap: 24, margin: "16px 0", flexWrap: "wrap" }}>
@@ -309,7 +310,7 @@ function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
           <div key={layerIndex} style={{ display: "flex", gap: 12 }}>
             {layer.map((node) => {
               const step = run.steps.find((s) => s.nodeId === node.id);
-              const agent = findAgent(node.agentId, demoAgents);
+              const agent = agentOf(run, node.agentId);
               if (!step) return null;
               const isSelected = step.id === selectedStepId;
               const isDimmed = selectedStepId !== undefined && !isSelected;
@@ -449,34 +450,92 @@ function buildRunFromFlow(flow: FlowDefinition, input: unknown): { running: Run;
   return { running, completed };
 }
 
-const AVAILABLE_FLOWS: FlowDefinition[] = [demoFlow];
+const DEMO_INPUT = {
+  title: "Add user lookup endpoint",
+  description: "Adds findUser so support can look users up by name.",
+  diff: [
+    "diff --git a/src/users.ts b/src/users.ts",
+    "+export async function findUser(db, req) {",
+    "+  const name = req.query.name;",
+    "+  return db.query(\"SELECT * FROM users WHERE name = '\" + name + \"'\");",
+    "+}",
+  ].join("\n"),
+};
+
+const secondaryButton = {
+  padding: "6px 12px",
+  borderRadius: 6,
+  border: `1px solid ${theme.border}`,
+  background: "transparent",
+  color: theme.text,
+  cursor: "pointer",
+  fontSize: 12,
+} as const;
+
+function errorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
+}
+
+/** The demo flow plus every flow saved in the Flows view. */
+function useRunnableFlows(): FlowDefinition[] {
+  const [flows, setFlows] = useState<FlowDefinition[]>([demoFlow]);
+  useEffect(() => {
+    if (!window.agentlab?.projects) return;
+    let cancelled = false;
+    void (async () => {
+      const { flows: entries } = await window.agentlab.projects.list();
+      const saved: FlowDefinition[] = [];
+      for (const entry of entries.filter((e) => e.status === "ok" && (e.nodeCount ?? 0) > 0)) {
+        try {
+          saved.push(JSON.parse(await window.agentlab.flows.read(entry.filePath)) as FlowDefinition);
+        } catch {
+          // Unreadable flow file: the Flows view shows the problem.
+        }
+      }
+      if (!cancelled) setFlows([demoFlow, ...saved.filter((f) => f.id !== demoFlow.id)]);
+    })().catch((error) => console.warn("Could not load saved flows:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return flows;
+}
 
 function NewRunDialog({
   onCancel,
   onStart,
 }: {
   onCancel: () => void;
-  onStart: (flow: FlowDefinition, input: unknown) => void;
+  onStart: (flow: FlowDefinition, input: unknown, folder?: string) => Promise<void>;
 }) {
-  const [flowId, setFlowId] = useState<string>(AVAILABLE_FLOWS[0].id);
-  const [inputText, setInputText] = useState<string>(
-    JSON.stringify({ pullRequestId: 42, repository: "acme/checkout" }, null, 2),
-  );
+  const flows = useRunnableFlows();
+  const [flowId, setFlowId] = useState<string>(demoFlow.id);
+  const [inputText, setInputText] = useState<string>(JSON.stringify(DEMO_INPUT, null, 2));
+  const [folder, setFolder] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
-  const flow = AVAILABLE_FLOWS.find((f) => f.id === flowId) ?? AVAILABLE_FLOWS[0];
+  const [starting, setStarting] = useState(false);
+  const flow = flows.find((f) => f.id === flowId) ?? flows[0];
 
-  const submit = () => {
+  const submit = async () => {
     let parsed: unknown = undefined;
     const trimmed = inputText.trim();
     if (trimmed.length > 0) {
       try {
         parsed = JSON.parse(trimmed);
       } catch {
-        setError("Input must be valid JSON (or empty).");
-        return;
+        // Plain text is a valid task too.
+        parsed = trimmed;
       }
     }
-    onStart(flow, parsed);
+    setStarting(true);
+    try {
+      await onStart(flow, parsed, folder);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setStarting(false);
+    }
   };
 
   return (
@@ -527,7 +586,7 @@ function NewRunDialog({
             fontSize: 14,
           }}
         >
-          {AVAILABLE_FLOWS.map((f) => (
+          {flows.map((f) => (
             <option key={f.id} value={f.id}>
               {f.name}
             </option>
@@ -538,7 +597,7 @@ function NewRunDialog({
         </div>
 
         <label style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>
-          Input (JSON)
+          Input (JSON or plain text)
         </label>
         <textarea
           value={inputText}
@@ -546,7 +605,7 @@ function NewRunDialog({
             setInputText(e.target.value);
             setError(undefined);
           }}
-          rows={7}
+          rows={10}
           style={{
             width: "100%",
             padding: 10,
@@ -562,6 +621,30 @@ function NewRunDialog({
         />
         {error && (
           <div style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{error}</div>
+        )}
+
+        {canRunForReal() && (
+          <>
+            <label style={{ display: "block", fontSize: 12, color: theme.textMuted, margin: "16px 0 6px" }}>
+              Folder agents may read (optional)
+            </label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <code style={{ flex: 1, fontSize: 12, color: folder ? theme.text : theme.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {folder ?? "None: agents only see the input above"}
+              </code>
+              <button type="button" onClick={() => void window.agentlab.runs.pickFolder().then((f) => f && setFolder(f))} style={secondaryButton}>
+                Choose…
+              </button>
+              {folder && (
+                <button type="button" onClick={() => setFolder(undefined)} style={secondaryButton}>
+                  Clear
+                </button>
+              )}
+            </div>
+            <p style={{ fontSize: 12, color: theme.textMuted, marginBottom: 0 }}>
+              Runs for real with Claude. Each step's model calls count against your Claude subscription or API key.
+            </p>
+          </>
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
@@ -582,8 +665,10 @@ function NewRunDialog({
           </button>
           <button
             type="button"
-            onClick={submit}
+            onClick={() => void submit()}
+            disabled={starting}
             style={{
+              opacity: starting ? 0.6 : 1,
               padding: "8px 16px",
               borderRadius: 6,
               border: `1px solid ${theme.primary}`,
@@ -594,7 +679,7 @@ function NewRunDialog({
               fontWeight: 600,
             }}
           >
-            ▶ Run
+            {starting ? "Starting…" : "▶ Run"}
           </button>
         </div>
       </div>
@@ -620,8 +705,16 @@ export function RunsView() {
     };
   }, []);
 
+  const [runError, setRunError] = useState<string | undefined>(undefined);
+
   const handleRerun = useCallback(
     (run: Run) => {
+      if (run.flow && canRunForReal()) {
+        // Real runs start again with the same flow snapshot and input.
+        const input = store.listEvents(run.id).find((e) => e.type === "flow_start")?.data as { input?: unknown } | undefined;
+        startRun(run.flow, input?.input).catch((error) => setRunError(errorText(error)));
+        return;
+      }
       const { running, completed } = buildRerun(run);
       store.saveRun(running);
       const timer = setTimeout(() => {
@@ -635,6 +728,10 @@ export function RunsView() {
 
   const handleStop = useCallback(
     (run: Run) => {
+      if (run.flow && canRunForReal()) {
+        void cancelRun(run.id); // the engine stops scheduling; running steps are aborted
+        return;
+      }
       const pending = rerunTimers.current.get(run.id);
       if (pending) {
         clearTimeout(pending);
@@ -662,7 +759,13 @@ export function RunsView() {
   );
 
   const handleStart = useCallback(
-    (flow: FlowDefinition, input: unknown) => {
+    async (flow: FlowDefinition, input: unknown, folder?: string) => {
+      if (canRunForReal()) {
+        const runId = await startRun(flow, input, folder); // throws into the dialog on failure
+        setNewRunOpen(false);
+        setSelectedRunId(runId);
+        return;
+      }
       const { running, completed } = buildRunFromFlow(flow, input);
       store.saveRun(running);
       const timer = setTimeout(() => {
@@ -676,6 +779,7 @@ export function RunsView() {
   );
 
   useEffect(() => {
+    connectLiveRuns();
     let cancelled = false;
     void store.hydrate().then(() => {
       if (cancelled) return;
@@ -775,7 +879,7 @@ export function RunsView() {
                 }}
               >
                 <div>
-                  <strong>{findFlow(run.flowId)?.name ?? run.flowId}</strong>
+                  <strong>{flowOf(run).id === run.flowId ? flowOf(run).name : run.flowId}</strong>
                   <div style={{ fontSize: 12, color: theme.textMuted }}>
                     {formatRelative(run.startedAt)} · {run.steps.length} steps
                   </div>
@@ -832,6 +936,14 @@ export function RunsView() {
               </div>
             );
           })}
+        </div>
+      )}
+      {runError && (
+        <div role="alert" style={{ marginTop: 12, color: theme.danger, fontSize: 13 }}>
+          {runError}{" "}
+          <button type="button" onClick={() => setRunError(undefined)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}>
+            ✕
+          </button>
         </div>
       )}
       {newRunOpen && (
