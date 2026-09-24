@@ -294,6 +294,15 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
         config.signal?.removeEventListener("abort", onAbort);
       }
       flush();
+      // A single model call can overshoot the limit without ever being aborted; still report it.
+      if (tokenLimitHit) {
+        return fail(`Stopped: token limit of ${agent.limits?.maxTokens} reached`, {
+          ...ZERO_USAGE,
+          inputTokens: streamedInput,
+          outputTokens: streamedOutput,
+          latencyMs: Date.now() - startedAt,
+        });
+      }
 
       if (!result) return fail(friendlyError(lastError, "Claude Code ended without a result"));
 

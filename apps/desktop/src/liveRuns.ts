@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { AgentStreamChunk, TraceEvent } from "@agentlab/contracts";
 import { getTelemetryStore } from "@agentlab/observability";
+import { playRunSound } from "./runSounds.js";
 
 // Real runs execute in the Electron main process with the Claude runtime; their snapshots and trace
 // events are pushed here and written into the shared telemetry store, which persists them and
@@ -14,7 +15,10 @@ export function connectLiveRuns(): void {
   connected = true;
   const store = getTelemetryStore();
   window.agentlab.runs.onEvent((event) => store.recordEvent(event));
-  window.agentlab.runs.onUpdate((run) => store.saveRun(run));
+  window.agentlab.runs.onUpdate((run) => {
+    store.saveRun(run);
+    playRunSound(run);
+  });
 }
 
 /** True in the desktop app, where runs call Claude; false in a browser preview (mock runtime). */
