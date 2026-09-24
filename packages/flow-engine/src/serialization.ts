@@ -9,10 +9,12 @@ export class FlowParseError extends Error {
 
 /** Serializes a flow to pretty JSON with a stable key order. */
 export function serializeFlow(flow: FlowDefinition): string {
+  const tags = normalizeTags(flow.tags ?? []);
   const clean: FlowDefinition = {
     id: flow.id,
     name: flow.name,
     ...(flow.description ? { description: flow.description } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
     nodes: flow.nodes.map((n) => ({
       id: n.id,
       agentId: n.agentId,
@@ -47,6 +49,10 @@ export function parseFlowShape(raw: unknown): FlowDefinition {
   if (raw.description !== undefined && typeof raw.description !== "string") {
     throw new FlowParseError(`flow.description must be a string`);
   }
+  if (raw.tags !== undefined && (!Array.isArray(raw.tags) || !raw.tags.every((t) => typeof t === "string"))) {
+    throw new FlowParseError(`flow.tags must be an array of strings`);
+  }
+  const tags = raw.tags ? normalizeTags(raw.tags as string[]) : [];
   if (!Array.isArray(raw.nodes)) throw new FlowParseError("flow.nodes must be an array");
 
   const nodes = raw.nodes.map((n, i): FlowNode => {
@@ -83,7 +89,30 @@ export function parseFlowShape(raw: unknown): FlowDefinition {
     return node;
   });
 
-  return { id, name, ...(typeof raw.description === "string" ? { description: raw.description } : {}), nodes };
+  return {
+    id,
+    name,
+    ...(typeof raw.description === "string" ? { description: raw.description } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+    nodes,
+  };
+}
+
+/**
+ * Cleans a tag list: trims and collapses whitespace, drops empties and removes
+ * case-insensitive duplicates (the first spelling wins). Order is preserved.
+ */
+export function normalizeTags(tags: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const tag = raw.trim().replace(/\s+/g, " ");
+    const key = tag.toLowerCase();
+    if (!tag || seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+  }
+  return out;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {

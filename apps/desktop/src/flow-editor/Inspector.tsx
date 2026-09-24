@@ -5,6 +5,7 @@ import { theme } from "../theme.js";
 import { DANGER } from "./EditorContext.js";
 import type { AgentFlowNode, AgentNodeData, FlowMeta } from "./graphMapping.js";
 import { buttonBase, inputStyle, preStyle } from "./styles.js";
+import { TagInput } from "./TagInput.js";
 
 interface Props {
   flow: FlowDefinition;
@@ -54,6 +55,11 @@ function FlowPanel({ flow, meta, onMetaChange, errors, levels, json, locked, age
             onChange={(e) => onMetaChange({ ...meta, description: e.target.value || undefined })}
           />
         </Field>
+        {/* Not a <Field>: a wrapping <label> would forward clicks to the first chip's remove button. */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 3 }}>Tags</div>
+          <TagInput tags={meta.tags ?? []} disabled={locked} onChange={(tags) => onMetaChange({ ...meta, tags: tags.length ? tags : undefined })} />
+        </div>
       </Section>
 
       <Section title={errors.length ? `Problems (${errors.length})` : "Validation"}>

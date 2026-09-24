@@ -5,7 +5,8 @@ import { alpha, theme } from "../theme.js";
 import { bridge, errorMessage } from "./bridge.js";
 import { STATUS_COLORS } from "./EditorContext.js";
 import { slugify } from "./graphMapping.js";
-import { buttonBase, primaryButton } from "./styles.js";
+import { buttonBase, inputStyle, primaryButton } from "./styles.js";
+import { TagChip } from "./TagInput.js";
 
 interface Props {
   onOpenLocal: (entry: ProjectEntry, content: string) => void;
@@ -21,6 +22,8 @@ export function ProjectsView({ onOpenLocal, onOpenCloud }: Props) {
   const [newName, setNewName] = useState("");
   const [target, setTarget] = useState<Target>("local");
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const [tagFilter, setTagFilter] = useState<string>();
 
   const refresh = useCallback(async () => {
     try {
@@ -100,8 +103,13 @@ export function ProjectsView({ onOpenLocal, onOpenCloud }: Props) {
     ...(state?.flows.map((entry): Item => ({ kind: "local", entry, sortKey: entry.lastOpenedAt ?? entry.modifiedAt ?? "" })) ?? []),
     ...(cloudFlows?.map((record): Item => ({ kind: "cloud", record, sortKey: record.updatedAt })) ?? []),
   ].sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+  const visible = items.filter((item) => matchesSearch(item, query, tagFilter));
 
   const loaded = state !== undefined && cloudFlows !== undefined;
+  const isActiveTag = (tag: string) => tag.toLowerCase() === tagFilter?.toLowerCase();
+  const toggleTag = (tag: string) => setTagFilter(isActiveTag(tag) ? undefined : tag);
+  const filtering = Boolean(query.trim() || tagFilter);
+  const tagProps = { isActiveTag, onToggleTag: toggleTag };
 
   return (
     <div style={{ padding: 24, height: "100%", boxSizing: "border-box", overflowY: "auto" }}>
@@ -175,12 +183,37 @@ export function ProjectsView({ onOpenLocal, onOpenCloud }: Props) {
         </div>
       ) : null}
 
+      {items.length > 0 ? (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+          <input
+            type="search"
+            placeholder="Search by name, description or tag"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            style={{ ...inputStyle, maxWidth: 420, fontSize: 14, padding: "8px 10px" }}
+          />
+          {tagFilter ? (
+            <TagChip active size="small" onClick={() => setTagFilter(undefined)} title="Clear tag filter">
+              {tagFilter} ×
+            </TagChip>
+          ) : null}
+          {filtering ? (
+            <span style={{ fontSize: 12, opacity: 0.6 }}>
+              {visible.length} of {items.length}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {items.length > 0 && visible.length === 0 ? <p style={{ opacity: 0.6, fontSize: 13 }}>No flows match the current search.</p> : null}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-        {items.map((item) =>
+        {visible.map((item) =>
           item.kind === "local" ? (
-            <LocalCard key={`local:${item.entry.filePath}`} entry={item.entry} onOpen={openLocal} onRemove={remove} onReveal={(fp) => run(() => bridge().projects.reveal(fp))} />
+            <LocalCard key={`local:${item.entry.filePath}`} entry={item.entry} {...tagProps} onOpen={openLocal} onRemove={remove} onReveal={(fp) => run(() => bridge().projects.reveal(fp))} />
           ) : (
-            <CloudCard key={`cloud:${item.record.id}`} record={item.record} onOpen={openCloud} onDelete={deleteCloud} />
+            <CloudCard key={`cloud:${item.record.id}`} record={item.record} {...tagProps} onOpen={openCloud} onDelete={deleteCloud} />
           ),
         )}
       </div>
@@ -196,17 +229,23 @@ export function ProjectsView({ onOpenLocal, onOpenCloud }: Props) {
 
 type Item = { kind: "local"; entry: ProjectEntry; sortKey: string } | { kind: "cloud"; record: FlowRecord; sortKey: string };
 
+interface TagProps {
+  isActiveTag: (tag: string) => boolean;
+  onToggleTag: (tag: string) => void;
+}
+
 function LocalCard({
   entry,
   onOpen,
   onRemove,
   onReveal,
+  ...tagProps
 }: {
   entry: ProjectEntry;
   onOpen: (entry: ProjectEntry) => void;
   onRemove: (entry: ProjectEntry) => void;
   onReveal: (filePath: string) => void;
-}) {
+} & TagProps) {
   const ok = entry.status === "ok";
   return (
     <div style={{ ...card, cursor: ok ? "pointer" : "default", opacity: ok ? 1 : 0.7 }} onClick={() => ok && onOpen(entry)} title={entry.filePath}>
@@ -216,6 +255,7 @@ function LocalCard({
       </div>
       {!ok ? <div style={{ color: STATUS_COLORS.failed, fontSize: 12, marginTop: 4 }}>{entry.status === "missing" ? "File missing" : "Invalid file"}</div> : null}
       {entry.description ? <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>{entry.description}</div> : null}
+      <CardTags tags={entry.tags} {...tagProps} />
       <div style={{ fontSize: 12, opacity: 0.6, marginTop: 8 }}>
         {ok ? `${entry.nodeCount} step${entry.nodeCount === 1 ? "" : "s"}` : null}
         {entry.modifiedAt ? ` · modified ${formatDate(entry.modifiedAt)}` : null}
@@ -240,7 +280,12 @@ function LocalCard({
   );
 }
 
-function CloudCard({ record, onOpen, onDelete }: { record: FlowRecord; onOpen: (record: FlowRecord) => void; onDelete: (record: FlowRecord) => void }) {
+function CloudCard({
+  record,
+  onOpen,
+  onDelete,
+  ...tagProps
+}: { record: FlowRecord; onOpen: (record: FlowRecord) => void; onDelete: (record: FlowRecord) => void } & TagProps) {
   return (
     <div style={{ ...card, cursor: "pointer" }} onClick={() => onOpen(record)} title={record.id}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
@@ -248,6 +293,7 @@ function CloudCard({ record, onOpen, onDelete }: { record: FlowRecord; onOpen: (
         <Badge kind="cloud" />
       </div>
       {record.description ? <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>{record.description}</div> : null}
+      <CardTags tags={record.tags} {...tagProps} />
       <div style={{ fontSize: 12, opacity: 0.6, marginTop: 8 }}>
         {record.nodes.length} step{record.nodes.length === 1 ? "" : "s"} · modified {formatDate(record.updatedAt)}
       </div>
@@ -262,6 +308,36 @@ function CloudCard({ record, onOpen, onDelete }: { record: FlowRecord; onOpen: (
       </div>
     </div>
   );
+}
+
+function CardTags({ tags, isActiveTag, onToggleTag }: { tags?: string[] } & TagProps) {
+  if (!tags?.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+      {tags.map((tag) => (
+        <TagChip key={tag} size="small" active={isActiveTag(tag)} onClick={() => onToggleTag(tag)} title={`Show flows tagged “${tag}”`}>
+          {tag}
+        </TagChip>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * `tag` must match one of the flow's tags exactly (case-insensitive). Each space-separated
+ * term of `query` must appear somewhere in the name, description, tags or file path / id.
+ */
+function matchesSearch(item: Item, query: string, tag?: string): boolean {
+  const flow = item.kind === "local" ? item.entry : item.record;
+  const location = item.kind === "local" ? item.entry.filePath : item.record.id;
+  const tags = (flow.tags ?? []).map((t) => t.toLowerCase());
+  if (tag && !tags.includes(tag.toLowerCase())) return false;
+  const haystack = [flow.name, flow.description, location, ...tags].filter(Boolean).join("\n").toLowerCase();
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((term) => haystack.includes(term));
 }
 
 function Badge({ kind }: { kind: Target }) {

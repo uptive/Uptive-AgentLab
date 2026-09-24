@@ -11,6 +11,7 @@ export interface ProjectEntry {
   id?: string;
   name?: string;
   description?: string;
+  tags?: string[];
   nodeCount?: number;
   modifiedAt?: string;
   lastOpenedAt?: string;
