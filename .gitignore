@@ -6,3 +6,6 @@ release/
 *.log
 .env
 .env.local
+.idea/
+*.env
+!.env.example

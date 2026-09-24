@@ -19,11 +19,15 @@ export interface UsageLimits {
   maxCostUsd?: number;
 }
 
+export type AgentStatus = "active" | "draft" | "disabled";
+
 export interface AgentDefinition {
   id: string;
   name: string;
   description?: string;
   role: string;
+  /** Lifecycle state shown in the UI; treated as "draft" when unset. */
+  status?: AgentStatus;
   systemInstructions: string;
   model: ModelId;
   modelSettings?: ModelSettings;
@@ -31,6 +35,22 @@ export interface AgentDefinition {
   inputSchema?: unknown;
   outputSchema?: unknown;
   limits?: UsageLimits;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Fields a caller supplies when creating an agent; id and timestamps are assigned by the store. */
+export type AgentInput = Omit<AgentDefinition, "id" | "createdAt" | "updatedAt">;
+
+/** Persistence for agent definitions. Shared seam: other groups look agents up through this. */
+export interface AgentStore {
+  list(): Promise<AgentDefinition[]>;
+  get(id: string): Promise<AgentDefinition | undefined>;
+  create(input: AgentInput): Promise<AgentDefinition>;
+  /** Partial update; throws if the agent does not exist. */
+  update(id: string, patch: Partial<AgentInput>): Promise<AgentDefinition>;
+  /** Returns false if the agent did not exist. */
+  delete(id: string): Promise<boolean>;
 }
 
 export interface AgentRunContext {

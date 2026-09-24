@@ -1,3 +1,13 @@
 packages:
   - "packages/*"
   - "apps/*"
+
+allowBuilds:
+  electron: true
+  esbuild: true
+
+# Turn off the minimum release age check entirely
+minimumReleaseAge: 0
+
+minimumReleaseAgeExclude:
+  - caniuse-lite
