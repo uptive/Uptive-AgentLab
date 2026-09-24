@@ -8,12 +8,14 @@
   "exports": {
     ".": "./src/index.ts",
     "./mongo": "./src/mongo.ts",
-    "./files": "./src/fileAgentStore.ts"
+    "./files": "./src/fileAgentStore.ts",
+    "./claude-cli": "./src/claudeCli.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "dependencies": {
     "@agentlab/contracts": "workspace:*",
@@ -21,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
   }
 }

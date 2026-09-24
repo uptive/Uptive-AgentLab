@@ -1,6 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeType, EvaluationResult, Recommendation, RecommendationCategory, RecommendationChange } from "@agentlab/contracts";
-import { CATEGORIES, analyzeRun, getModel, type EvaluationInput } from "@agentlab/optimization";
+import {
+  CATEGORIES,
+  DEFAULT_EVALUATOR_MODEL,
+  EVALUATOR_MODELS,
+  analyzeRun,
+  createEvaluators,
+  getModel,
+  type EvaluationInput,
+  type EvaluatorProgress,
+  type ModelClient,
+} from "@agentlab/optimization";
+import { modelClient } from "../optimize/modelClient.js";
 import { runSource, type RunSummary } from "../optimize/runSource.js";
 import "./OptimizeView.css";
 
@@ -22,7 +33,35 @@ const CHANGE_LABELS: Record<ChangeType, string> = {
   "add-node": "New step",
   "merge-nodes": "Merge steps",
   "edit-role": "Role change",
+  "edit-input-mapping": "Input mapping",
 };
+
+const DEFAULT_MODEL_KEY = "agentlab.optimize.defaultModel";
+
+function loadDefaultModel(): string {
+  try {
+    const saved = localStorage.getItem(DEFAULT_MODEL_KEY);
+    return EVALUATOR_MODELS.some((m) => m.id === saved) ? saved! : DEFAULT_EVALUATOR_MODEL;
+  } catch {
+    return DEFAULT_EVALUATOR_MODEL;
+  }
+}
+
+function saveDefaultModel(modelId: string) {
+  try {
+    localStorage.setItem(DEFAULT_MODEL_KEY, modelId);
+  } catch {
+    // Storage unavailable: the choice lasts for this session only.
+  }
+}
+
+const modelLabel = (modelId: string) => EVALUATOR_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
+
+/** Quality and Model Selection ask Claude on `modelId` (through Electron main); the others are rule-based. */
+function evaluatorsFor(modelId: string) {
+  const client: ModelClient = { generateJson: (request) => modelClient.generateJson({ ...request, model: modelId }) };
+  return createEvaluators(client);
+}
 
 export function OptimizeView() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
@@ -34,6 +73,21 @@ export function OptimizeView() {
   const [categoryFilter, setCategoryFilter] = useState<RecommendationCategory>();
   const [nodeFilter, setNodeFilter] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [defaultModel, setDefaultModel] = useState(loadDefaultModel);
+  const [analyzingWith, setAnalyzingWith] = useState<string>();
+  const [analyzedWith, setAnalyzedWith] = useState<string>();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Live progress while analyzing: the run being reviewed, each evaluator's status, and a clock.
+  const [pendingInput, setPendingInput] = useState<EvaluationInput>();
+  const [progress, setProgress] = useState<Record<string, EvaluatorProgress & { finishedMs?: number }>>({});
+  const [startedAt, setStartedAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!analyzing) return;
+    const timer = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [analyzing]);
 
   useEffect(() => {
     runSource.listRuns().then((list) => {
@@ -42,17 +96,31 @@ export function OptimizeView() {
     });
   }, []);
 
-  async function handleAnalyze() {
+  async function handleAnalyze(modelId: string) {
     setAnalyzing(true);
+    setAnalyzingWith(modelId);
+    setProgress({});
+    setPendingInput(undefined);
+    const started = Date.now();
+    setStartedAt(started);
+    setNow(started);
     setError(undefined);
     setCategoryFilter(undefined);
     setNodeFilter(undefined);
     try {
       const loaded = await runSource.loadRun(selectedRunId);
       if (!loaded) throw new Error(`Run ${selectedRunId} was not found. Pick another run.`);
-      const evaluation = await analyzeRun(loaded);
+      setPendingInput(loaded);
+      const evaluation = await analyzeRun(loaded, evaluatorsFor(modelId), {
+        onProgress: (update) =>
+          setProgress((current) => ({
+            ...current,
+            [update.evaluatorId]: { ...update, finishedMs: update.status === "running" ? undefined : Date.now() - started },
+          })),
+      });
       setInput(loaded);
       setResult(evaluation);
+      setAnalyzedWith(modelId);
       setExpanded(new Set());
     } catch (e) {
       setResult(undefined);
@@ -105,21 +173,40 @@ export function OptimizeView() {
               </option>
             ))}
           </select>
-          <button className="opt-primary" onClick={handleAnalyze} disabled={!selectedRunId || analyzing}>
-            {analyzing ? "Analyzing…" : "Analyze run"}
+          <AnalyzeButton defaultModel={defaultModel} disabled={!selectedRunId || analyzing} analyzing={analyzing} onAnalyze={handleAnalyze} />
+          <button className="opt-icon-button" aria-label="Optimize settings" title="Settings" onClick={() => setSettingsOpen(true)}>
+            <GearIcon />
           </button>
         </div>
       </header>
 
+      <SettingsDialog
+        open={settingsOpen}
+        defaultModel={defaultModel}
+        onChangeDefaultModel={(modelId) => {
+          setDefaultModel(modelId);
+          saveDefaultModel(modelId);
+        }}
+        onClose={() => setSettingsOpen(false)}
+      />
+
       {error ? <p className="opt-error">{error}</p> : null}
+      {analyzing ? (
+        <AnalysisProgress input={pendingInput} progress={progress} modelId={analyzingWith ?? defaultModel} elapsedMs={now - startedAt} />
+      ) : null}
       {!result && !analyzing && !error ? <p className="opt-empty">Pick a run and analyze it to see what to change.</p> : null}
 
-      {input && result ? (
+      {input && result && !analyzing ? (
         <>
-          <Headline input={input} result={result} />
+          <Headline input={input} result={result} analyzedWith={analyzedWith} />
           {result.skippedEvaluators.map((s) => (
             <p key={s.evaluatorId} className="opt-notice">
               {CATEGORY_LABELS[s.category]} was not analyzed: {s.reason}
+            </p>
+          ))}
+          {result.fallbackEvaluators.map((s) => (
+            <p key={s.evaluatorId} className="opt-notice">
+              {CATEGORY_LABELS[s.category]} used built-in rules because Claude was unavailable: {s.reason}
             </p>
           ))}
 
@@ -216,18 +303,23 @@ function percentChange(before: number, after: number): string {
 }
 
 function Impact({ recommendation }: { recommendation: Recommendation }) {
-  const isRisk = !recommendation.estimatedImpact.cost && !recommendation.estimatedImpact.speed && !recommendation.estimatedImpact.reliability;
-  return <span className={`opt-impact${isRisk ? " risk" : ""}`}>{headlineImpact(recommendation)}</span>;
+  const { text, gain } = headlineImpact(recommendation);
+  return <span className={`opt-impact${gain ? "" : " risk"}`}>{text}</span>;
 }
 
-/** The one number that best describes a recommendation: cost, then speed, then retries, then quality risk. */
-function headlineImpact(r: Recommendation): string {
+/**
+ * The one number that best describes a recommendation, leading with what you gain: a cost saving,
+ * then time saved, then retries avoided. A cost increase or a quality risk is shown only when
+ * there's no gain to show, and never in the gain color.
+ */
+function headlineImpact(r: Recommendation): { text: string; gain: boolean } {
   const { cost, speed, reliability, quality } = r.estimatedImpact;
-  if (cost) return `${cost.percent < 0 ? "−" : "+"}${Math.abs(cost.percent)}% cost`;
-  if (speed) return `${signed(seconds(speed.latencyMs), speed.latencyMs)} run`;
-  if (reliability) return `−${reliability.retriesAvoided} retr${reliability.retriesAvoided === 1 ? "y" : "ies"}`;
-  if (quality) return `${quality.risk} risk`;
-  return "";
+  if (cost && cost.percent < 0) return { text: `−${Math.abs(cost.percent)}% cost`, gain: true };
+  if (speed && speed.latencyMs < 0) return { text: `${signed(seconds(speed.latencyMs), speed.latencyMs)} run`, gain: true };
+  if (reliability) return { text: `−${reliability.retriesAvoided} retr${reliability.retriesAvoided === 1 ? "y" : "ies"}`, gain: true };
+  if (cost) return { text: `+${cost.percent}% cost`, gain: false };
+  if (quality) return { text: `${quality.risk} risk`, gain: false };
+  return { text: "", gain: false };
 }
 
 function categoryTotals(result: EvaluationResult, category: RecommendationCategory): string {
@@ -244,7 +336,7 @@ function targetLabel(r: Recommendation): string {
   return r.target.kind === "node" ? r.target.nodeId : r.target.kind === "agent" ? r.target.agentId : "whole flow";
 }
 
-function Headline({ input, result }: { input: EvaluationInput; result: EvaluationResult }) {
+function Headline({ input, result, analyzedWith }: { input: EvaluationInput; result: EvaluationResult; analyzedWith?: string }) {
   const { baseline, projected } = result.summary;
   const usage = input.run.totalUsage;
   const figures = [
@@ -255,6 +347,7 @@ function Headline({ input, result }: { input: EvaluationInput; result: Evaluatio
     <section className="opt-hero">
       <div className="opt-eyebrow">
         {input.flow.name} · <span className="mono">{input.run.id}</span>
+        {analyzedWith && result.fallbackEvaluators.length === 0 ? ` · reviewed by ${modelLabel(analyzedWith)}` : ""}
       </div>
       <div className="opt-figures">
         {figures.map((f) => (
@@ -479,4 +572,260 @@ function ChangeDiff({ change }: { change: RecommendationChange }) {
 /** Renders `backtick` spans from evaluator text as <code>. */
 function withInlineCode(text: string) {
   return text.split(/`([^`]+)`/).map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
+}
+
+function clock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Shown while analyzing: the run's steps with a scan line sweeping across them (each step lights up
+ * as it passes), a bar that fills as evaluators finish, and each evaluator's live status.
+ */
+function AnalysisProgress({
+  input,
+  progress,
+  modelId,
+  elapsedMs,
+}: {
+  input?: EvaluationInput;
+  progress: Record<string, EvaluatorProgress & { finishedMs?: number }>;
+  modelId: string;
+  elapsedMs: number;
+}) {
+  const entries = Object.values(progress);
+  const total = entries.length || 4;
+  const finished = entries.filter((e) => e.status !== "running").length;
+
+  const runStart = input ? Date.parse(input.run.startedAt) : 0;
+  const span = input?.run.totalUsage?.latencyMs ?? 1;
+  const steps = (input?.run.steps ?? []).map((step) => {
+    const start = step.startedAt ? (Date.parse(step.startedAt) - runStart) / span : 0;
+    const end = step.completedAt ? (Date.parse(step.completedAt) - runStart) / span : 1;
+    return { id: step.id, name: input!.agents.find((a) => a.id === step.agentId)?.name ?? step.agentId, start, end };
+  });
+
+  function detail(e: EvaluatorProgress & { finishedMs?: number }): string {
+    const found = `${e.recommendations ?? 0} found`;
+    const took = e.finishedMs && e.finishedMs >= 1000 ? ` · ${clock(e.finishedMs)}` : "";
+    switch (e.status) {
+      case "running":
+        return e.modelBacked ? `Asking ${modelLabel(modelId)} · ${clock(elapsedMs)}` : "Checking…";
+      case "done":
+        return found + took;
+      case "fallback":
+        return `Claude unavailable, used built-in rules · ${found}`;
+      case "skipped":
+        return "Not analyzed";
+    }
+  }
+
+  return (
+    <section className="opt-progress" aria-label="Analysis progress">
+      <div className="opt-progress-head">
+        <div>
+          <div className="opt-eyebrow">{input ? `${input.flow.name} · ${input.run.id}` : "Loading run…"}</div>
+          <h2 className="opt-progress-title">Reviewing the run with {modelLabel(modelId)}</h2>
+        </div>
+        <div className="opt-progress-clock" aria-label={`Elapsed ${clock(elapsedMs)}`}>
+          {clock(elapsedMs)}
+        </div>
+      </div>
+
+      <div
+        className="opt-progress-bar"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={finished}
+        aria-valuetext={`${finished} of ${total} evaluators finished`}
+      >
+        <div className="fill" style={{ width: `${Math.max((finished / total) * 100, 3)}%` }} />
+      </div>
+
+      {steps.length ? (
+        <div className="opt-scan" aria-hidden="true">
+          {steps.map((s) => (
+            <div key={s.id} className="opt-scan-row">
+              <span className="opt-scan-name">{s.name}</span>
+              <span className="opt-scan-track">
+                <span
+                  className="opt-scan-bar"
+                  style={{ left: `${s.start * 100}%`, width: `${(s.end - s.start) * 100}%`, animationDelay: `${s.start * 2.8}s` }}
+                />
+              </span>
+            </div>
+          ))}
+          <span className="opt-scan-line" />
+        </div>
+      ) : null}
+
+      <ul className="opt-checklist" aria-live="polite">
+        {entries.map((e) => (
+          <li key={e.evaluatorId} className={`is-${e.status}`}>
+            <span className="opt-status-icon" aria-hidden="true">
+              {e.status === "done" ? "✓" : e.status === "fallback" ? "!" : e.status === "skipped" ? "×" : ""}
+            </span>
+            <span className="name">{CATEGORY_LABELS[e.category]}</span>
+            <span className="detail">{detail(e)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Split button: the main part analyzes with the default model; the arrow opens a menu to pick another model and analyze with it. */
+function AnalyzeButton({
+  defaultModel,
+  disabled,
+  analyzing,
+  onAnalyze,
+}: {
+  defaultModel: string;
+  disabled: boolean;
+  analyzing: boolean;
+  onAnalyze: (modelId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+    const onPointerDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        toggleRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  function moveFocus(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ?? [])];
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    items[(index + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+  }
+
+  return (
+    <div className="opt-split" ref={rootRef}>
+      <button className="opt-primary opt-split-main" disabled={disabled} onClick={() => onAnalyze(defaultModel)} title={`Analyze with ${modelLabel(defaultModel)}`}>
+        {analyzing ? "Analyzing…" : "Analyze run"}
+      </button>
+      <button
+        ref={toggleRef}
+        className="opt-primary opt-split-toggle"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Analyze with another model"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open ? (
+        <div className="opt-menu" role="menu" aria-label="Analyze with" ref={menuRef} onKeyDown={moveFocus}>
+          <div className="opt-menu-label" aria-hidden="true">
+            Analyze with
+          </div>
+          {EVALUATOR_MODELS.map((m) => (
+            <button
+              key={m.id}
+              role="menuitem"
+              className="opt-menu-item"
+              onClick={() => {
+                setOpen(false);
+                onAnalyze(m.id);
+              }}
+            >
+              <span className="name">
+                {m.label}
+                {m.id === defaultModel ? <span className="badge">Default</span> : null}
+              </span>
+              <span className="note">{m.note}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SettingsDialog({
+  open,
+  defaultModel,
+  onChangeDefaultModel,
+  onClose,
+}: {
+  open: boolean;
+  defaultModel: string;
+  onChangeDefaultModel: (modelId: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  return (
+    <dialog
+      ref={ref}
+      className="opt-dialog"
+      aria-labelledby="opt-settings-title"
+      onClose={onClose}
+      onClick={(e) => {
+        if (e.target === ref.current) onClose(); // click on the backdrop
+      }}
+    >
+      <form method="dialog">
+        <h2 id="opt-settings-title">Settings</h2>
+        <fieldset>
+          <legend>Default model</legend>
+          <p className="hint">Used when you click Analyze run. Pick another model for a single run from the arrow next to it.</p>
+          {EVALUATOR_MODELS.map((m) => (
+            <label key={m.id} className="opt-radio">
+              <input type="radio" name="default-model" value={m.id} checked={m.id === defaultModel} onChange={() => onChangeDefaultModel(m.id)} />
+              <span>
+                <span className="name">{m.label}</span>
+                <span className="note">{m.note}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <div className="opt-dialog-actions">
+          <button className="opt-primary" value="done">
+            Done
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
 }
