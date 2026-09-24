@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MongoClient, ServerApiVersion } from "mongodb";
@@ -9,6 +10,10 @@ import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
 import { createMongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createAgentFileMirror, createMirroredAgentStore } from "@agentlab/agent-runtime/files";
+import type { JsonRequest } from "@agentlab/optimization";
+import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
+import { IPC, type ProjectEntry } from "./api.js";
+import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,7 +80,78 @@ function getStores(): Promise<Stores> {
 // Telemetry payload guard for the load/save bridge used by the renderer's RunPersistenceAdapter.
 const MAX_TELEMETRY_BYTES = 25 * 1024 * 1024;
 
-function registerIpc() {
+const JSON_FILTERS = [{ name: "Flow definition", extensions: ["json"] }];
+
+const slugify = (s: string) =>
+  s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "flow";
+
+function registerIpc(store: EditorConfigStore) {
+  /** Renderer may only touch files the user registered via the project view. */
+  const assertRegistered = async (filePath: string) => {
+    if (!(await store.isRegistered(filePath))) throw new Error(`Flow file is not registered in the project: ${filePath}`);
+  };
+
+  ipcMain.handle(IPC.listProjects, () => store.state());
+
+  ipcMain.handle(IPC.createProject, async (_event, name: string) => {
+    const trimmed = name.trim() || "Untitled flow";
+    const { flowsDirectory } = await store.load();
+    await mkdir(flowsDirectory, { recursive: true });
+
+    const id = slugify(trimmed);
+    const content = JSON.stringify({ id, name: trimmed, nodes: [] }, null, 2) + "\n";
+    // Pick a free file name; "wx" guarantees we never overwrite an existing file.
+    for (let i = 1; ; i++) {
+      const filePath = path.join(flowsDirectory, i === 1 ? `${id}.json` : `${id}-${i}.json`);
+      try {
+        await writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "EEXIST") continue;
+        throw err;
+      }
+      await store.register(filePath);
+      return { entry: await store.entry(filePath), content };
+    }
+  });
+
+  ipcMain.handle(IPC.addProjects, async (event): Promise<ProjectEntry[]> => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = { properties: ["openFile" as const, "multiSelections" as const], filters: JSON_FILTERS };
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (result.canceled) return [];
+
+    const entries: ProjectEntry[] = [];
+    for (const filePath of result.filePaths) {
+      const entry = await describeFlowFile(filePath);
+      if (entry.status !== "ok") throw new Error(`${path.basename(filePath)} is not a valid flow definition`);
+      entries.push(entry);
+    }
+    for (const entry of entries) await store.register(entry.filePath, false);
+    return entries;
+  });
+
+  ipcMain.handle(IPC.removeProject, async (_event, filePath: string) => {
+    await store.unregister(filePath);
+  });
+
+  ipcMain.handle(IPC.revealProject, async (_event, filePath: string) => {
+    await assertRegistered(filePath);
+    shell.showItemInFolder(filePath);
+  });
+
+  ipcMain.handle(IPC.readFlow, async (_event, filePath: string) => {
+    await assertRegistered(filePath);
+    const content = await readFile(filePath, "utf8");
+    await store.register(filePath); // bump lastOpenedAt
+    return content;
+  });
+
+  ipcMain.handle(IPC.writeFlow, async (_event, filePath: string, json: string) => {
+    await assertRegistered(filePath);
+    await writeFile(filePath, json, "utf8");
+    return store.entry(filePath);
+  });
+
   ipcMain.handle("agents:list", async () => (await getStores()).agents.list());
   ipcMain.handle("agents:get", async (_e, id: string) => (await getStores()).agents.get(id));
   ipcMain.handle("agents:create", async (_e, input: AgentInput) => (await getStores()).agents.create(input));
@@ -83,6 +159,10 @@ function registerIpc() {
     (await getStores()).agents.update(id, patch),
   );
   ipcMain.handle("agents:delete", async (_e, id: string) => (await getStores()).agents.delete(id));
+
+  // Model calls for LLM-backed evaluators run here so API credentials never reach the renderer.
+  const modelClient = createAnthropicModelClient();
+  ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
 
   ipcMain.handle("telemetry:recordEvent", async (_e, event: TraceEvent) => (await getStores()).telemetry.recordEvent(event));
   ipcMain.handle("telemetry:listEvents", async (_e, runId: string) => (await getStores()).telemetry.listEvents(runId));
@@ -122,8 +202,8 @@ function registerIpc() {
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1400,
+    height: 900,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -140,7 +220,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  registerIpc();
+  const store = new EditorConfigStore(
+    path.join(app.getPath("userData"), "editor-config.json"),
+    path.join(app.getPath("documents"), "AgentLab", "Flows"),
+  );
+  registerIpc(store);
   getStores().then(
     () => console.log("[db] connected to MongoDB"),
     (error) => console.error("[db] MongoDB connection failed:", error.message),

@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import type { AgentDefinition, AgentInput, AgentStatus, ToolRef } from "@agentlab/contracts";
-import { ads } from "../theme.js";
+import { theme } from "../theme.js";
 
 const MODELS = ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-fable-5-1"];
 
@@ -94,20 +94,20 @@ function errorMessage(error: unknown): string {
 }
 
 const STATUS_STYLES: Record<AgentStatus, CSSProperties> = {
-  active: { background: ads.statusActive, color: "#FFFFFF" },
-  draft: { background: ads.statusDraft, color: "#FFFFFF" },
-  disabled: { background: ads.statusDisabledBg, color: ads.statusDisabledText },
+  active: { background: theme.statusActive, color: theme.onStatus },
+  draft: { background: theme.statusDraft, color: theme.onStatus },
+  disabled: { background: theme.statusDisabledBg, color: theme.statusDisabledText },
 };
 
-const titleStyle: CSSProperties = { fontFamily: ads.fontTitle, fontWeight: 600, color: ads.navy, margin: 0 };
+const titleStyle: CSSProperties = { fontFamily: theme.fontTitle, fontWeight: 600, color: theme.title, margin: 0 };
 
 const pillButton: CSSProperties = {
   padding: "8px 18px",
   borderRadius: 999,
   border: "none",
-  background: ads.primary,
-  color: "#FFFFFF",
-  fontFamily: ads.fontBody,
+  background: theme.primary,
+  color: theme.onPrimary,
+  fontFamily: theme.fontBody,
   fontWeight: 500,
   fontSize: 14,
   cursor: "pointer",
@@ -116,8 +116,8 @@ const pillButton: CSSProperties = {
 const ghostButton: CSSProperties = {
   ...pillButton,
   background: "transparent",
-  color: ads.textSecondary,
-  border: `1px solid ${ads.border}`,
+  color: theme.textSecondary,
+  border: `1px solid ${theme.border}`,
 };
 
 const fieldInput: CSSProperties = {
@@ -125,19 +125,19 @@ const fieldInput: CSSProperties = {
   boxSizing: "border-box",
   padding: "9px 12px",
   borderRadius: 8,
-  border: `1px solid ${ads.border}`,
-  background: ads.surface,
-  color: ads.text,
-  fontFamily: ads.fontBody,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  color: theme.text,
+  fontFamily: theme.fontBody,
   fontSize: 14,
 };
 
 const codeInput: CSSProperties = {
   ...fieldInput,
-  fontFamily: ads.fontMono,
+  fontFamily: theme.fontMono,
   fontSize: 13,
   lineHeight: 1.5,
-  background: ads.pageBg,
+  background: theme.codeBg,
   resize: "vertical",
 };
 
@@ -171,15 +171,15 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
         padding: "10px 14px",
         marginBottom: 16,
         borderRadius: 8,
-        background: ads.errorBg,
-        color: ads.errorText,
+        background: theme.errorBg,
+        color: theme.errorText,
         fontSize: 14,
       }}
     >
       <span>{message}</span>
       <button
         onClick={onDismiss}
-        style={{ ...ghostButton, padding: "4px 12px", color: ads.errorText, borderColor: "rgba(142,25,31,.3)" }}
+        style={{ ...ghostButton, padding: "4px 12px", color: theme.errorText, borderColor: "currentColor" }}
       >
         Dismiss
       </button>
@@ -190,7 +190,7 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label style={{ display: "block", marginBottom: 18 }}>
-      <span style={{ display: "block", fontSize: 13, fontWeight: 500, color: ads.textSecondary, marginBottom: 6 }}>
+      <span style={{ display: "block", fontSize: 13, fontWeight: 500, color: theme.textSecondary, marginBottom: 6 }}>
         {label}
       </span>
       {children}
@@ -217,12 +217,12 @@ function StatInput({
       style={{
         display: "block",
         padding: "10px 12px",
-        border: `1px solid ${ads.border}`,
+        border: `1px solid ${theme.border}`,
         borderRadius: 8,
-        background: ads.pageBg,
+        background: theme.codeBg,
       }}
     >
-      <span style={{ display: "block", fontSize: 12, color: ads.textMuted, marginBottom: 4 }}>{label}</span>
+      <span style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>{label}</span>
       <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
         <input
           type="number"
@@ -233,14 +233,14 @@ function StatInput({
             border: "none",
             background: "transparent",
             padding: 0,
-            fontFamily: ads.fontTitle,
+            fontFamily: theme.fontTitle,
             fontWeight: 600,
             fontSize: 20,
-            color: ads.navy,
+            color: theme.title,
             outline: "none",
           }}
         />
-        {unit ? <span style={{ fontSize: 12, color: ads.textMuted }}>{unit}</span> : null}
+        {unit ? <span style={{ fontSize: 12, color: theme.textMuted }}>{unit}</span> : null}
       </span>
     </label>
   );
@@ -271,14 +271,14 @@ function ToolChips({ tools, onChange }: { tools: ToolRef[]; onChange: (tools: To
               gap: 6,
               padding: "4px 6px 4px 12px",
               borderRadius: 999,
-              border: `1px solid ${ads.border}`,
-              background: ads.pageBg,
+              border: `1px solid ${theme.border}`,
+              background: theme.codeBg,
               fontSize: 13,
-              color: ads.text,
+              color: theme.text,
             }}
           >
             {tool.name}
-            <span style={{ fontFamily: ads.fontMono, fontSize: 11, color: ads.textMuted }}>{tool.kind}</span>
+            <span style={{ fontFamily: theme.fontMono, fontSize: 11, color: theme.textMuted }}>{tool.kind}</span>
             <button
               type="button"
               aria-label={`Remove ${tool.name}`}
@@ -286,7 +286,7 @@ function ToolChips({ tools, onChange }: { tools: ToolRef[]; onChange: (tools: To
               style={{
                 border: "none",
                 background: "transparent",
-                color: ads.textMuted,
+                color: theme.textMuted,
                 cursor: "pointer",
                 fontSize: 16,
                 lineHeight: 1,
@@ -338,9 +338,9 @@ function AgentCard({ agent, onOpen }: { agent: AgentDefinition; onOpen: () => vo
         textAlign: "left",
         padding: 18,
         borderRadius: 12,
-        border: `1px solid ${ads.border}`,
-        background: ads.surface,
-        boxShadow: ads.cardShadow,
+        border: `1px solid ${theme.border}`,
+        background: theme.surface,
+        boxShadow: theme.cardShadow,
         cursor: "pointer",
         font: "inherit",
       }}
@@ -354,7 +354,7 @@ function AgentCard({ agent, onOpen }: { agent: AgentDefinition; onOpen: () => vo
       <span
         style={{
           fontSize: 14,
-          color: ads.textSecondary,
+          color: theme.textSecondary,
           lineHeight: 1.45,
           display: "-webkit-box",
           WebkitLineClamp: 2,
@@ -368,11 +368,11 @@ function AgentCard({ agent, onOpen }: { agent: AgentDefinition; onOpen: () => vo
         style={{
           marginTop: "auto",
           paddingTop: 12,
-          borderTop: `1px solid ${ads.border}`,
+          borderTop: `1px solid ${theme.border}`,
           width: "100%",
-          fontFamily: ads.fontMono,
+          fontFamily: theme.fontMono,
           fontSize: 12,
-          color: ads.primary,
+          color: theme.primary,
         }}
       >
         {agent.model}
@@ -464,20 +464,15 @@ export function AgentsView() {
   return (
     <div
       style={{
-        // Fill the shell's content area (which pads 24px) with the light page background.
-        margin: -24,
-        padding: "28px 32px",
-        minHeight: "calc(100% + 48px)",
-        boxSizing: "border-box",
-        background: ads.pageBg,
-        color: ads.text,
-        fontFamily: ads.fontBody,
+        padding: "4px 8px",
+        color: theme.text,
+        fontFamily: theme.fontBody,
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <h1 style={{ ...titleStyle, fontSize: 26 }}>Agents</h1>
-          <p style={{ margin: "4px 0 0", color: ads.textSecondary, fontSize: 14 }}>
+          <p style={{ margin: "4px 0 0", color: theme.textSecondary, fontSize: 14 }}>
             {loading && agents.length === 0 ? "\u00a0" : `${agents.length} ${agents.length === 1 ? "agent" : "agents"}`}
           </p>
         </div>
@@ -498,9 +493,9 @@ export function AgentsView() {
       {error && !drawerOpen ? <ErrorBanner message={error} onDismiss={() => setError(undefined)} /> : null}
 
       {loading && agents.length === 0 ? (
-        <p style={{ color: ads.textMuted }}>Loading agents…</p>
+        <p style={{ color: theme.textMuted }}>Loading agents…</p>
       ) : agents.length === 0 ? (
-        <p style={{ color: ads.textMuted }}>No agents yet.</p>
+        <p style={{ color: theme.textMuted }}>No agents yet.</p>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 14 }}>
           {agents.map((agent) => (
@@ -513,7 +508,7 @@ export function AgentsView() {
         <>
           <div
             onClick={() => setEditing(undefined)}
-            style={{ position: "fixed", inset: 0, background: ads.backdrop, zIndex: 10 }}
+            style={{ position: "fixed", inset: 0, background: theme.backdrop, zIndex: 10 }}
           />
           <form
             onSubmit={handleSubmit}
@@ -529,8 +524,8 @@ export function AgentsView() {
               maxWidth: "100vw",
               display: "flex",
               flexDirection: "column",
-              background: ads.surface,
-              boxShadow: ads.drawerShadow,
+              background: theme.surface,
+              boxShadow: theme.drawerShadow,
               zIndex: 11,
             }}
           >
@@ -541,7 +536,7 @@ export function AgentsView() {
                 justifyContent: "space-between",
                 gap: 12,
                 padding: "20px 24px",
-                borderBottom: `1px solid ${ads.border}`,
+                borderBottom: `1px solid ${theme.border}`,
               }}
             >
               <div style={{ minWidth: 0 }}>
@@ -549,14 +544,14 @@ export function AgentsView() {
                   {editing ? editing.name : "New agent"}
                 </h2>
                 {editing ? (
-                  <span style={{ fontFamily: ads.fontMono, fontSize: 12, color: ads.textMuted }}>{editing.id}</span>
+                  <span style={{ fontFamily: theme.fontMono, fontSize: 12, color: theme.textMuted }}>{editing.id}</span>
                 ) : null}
               </div>
               <button
                 type="button"
                 aria-label="Close"
                 onClick={() => setEditing(undefined)}
-                style={{ border: "none", background: "transparent", fontSize: 24, color: ads.textMuted, cursor: "pointer" }}
+                style={{ border: "none", background: "transparent", fontSize: 24, color: theme.textMuted, cursor: "pointer" }}
               >
                 ×
               </button>
@@ -598,7 +593,7 @@ export function AgentsView() {
                 />
               </Field>
               <Field label="Model *">
-                <select style={{ ...fieldInput, fontFamily: ads.fontMono, fontSize: 13 }} value={form.model} onChange={set("model")} required>
+                <select style={{ ...fieldInput, fontFamily: theme.fontMono, fontSize: 13 }} value={form.model} onChange={set("model")} required>
                   {modelOptions.map((model) => (
                     <option key={model} value={model}>
                       {model}
@@ -653,14 +648,14 @@ export function AgentsView() {
                 alignItems: "center",
                 gap: 8,
                 padding: "16px 24px",
-                borderTop: `1px solid ${ads.border}`,
+                borderTop: `1px solid ${theme.border}`,
               }}
             >
               {editing ? (
                 <button
                   type="button"
                   onClick={() => handleDelete(editing)}
-                  style={{ ...ghostButton, color: ads.errorText, borderColor: ads.errorBg }}
+                  style={{ ...ghostButton, color: theme.errorText, borderColor: theme.errorBg }}
                 >
                   Delete
                 </button>

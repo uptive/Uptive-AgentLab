@@ -3,14 +3,14 @@ import type { AgentDefinition, FlowDefinition, Run, RunStatus, StepRun } from "@
 import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
 import { demoAgents, findAgent } from "@agentlab/agent-runtime";
 import { computeFlowLayers, demoFlow, findFlow } from "@agentlab/flow-engine";
-import { colors } from "../theme.js";
+import { theme } from "../theme.js";
 import { demoRuns, demoTraceEvents } from "../demoRuns.js";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
-  pending: colors.muted,
-  running: colors.warning,
-  completed: colors.accent,
-  failed: colors.danger,
+  pending: theme.statusDraft,
+  running: theme.warning,
+  completed: theme.statusActive,
+  failed: theme.danger,
 };
 
 function StatusBadge({ status }: { status: RunStatus }) {
@@ -22,7 +22,7 @@ function StatusBadge({ status }: { status: RunStatus }) {
         borderRadius: 999,
         fontSize: 12,
         fontWeight: 600,
-        color: colors.bgBlack,
+        color: theme.onStatus,
         background: STATUS_COLORS[status],
         textTransform: "capitalize",
       }}
@@ -58,8 +58,8 @@ function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre
       style={{
-        background: colors.bgBlack,
-        border: `1px solid ${colors.bgCard}`,
+        background: theme.codeBg,
+        border: `1px solid ${theme.border}`,
         borderRadius: 6,
         padding: 10,
         fontSize: 12,
@@ -78,7 +78,7 @@ function JsonBlock({ value }: { value: unknown }) {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div style={{ fontSize: 12, color: colors.muted }}>{label}</div>
+      <div style={{ fontSize: 12, color: theme.textMuted }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 600 }}>{value}</div>
     </div>
   );
@@ -101,8 +101,8 @@ function StepDetail({
   return (
     <div
       style={{
-        background: colors.bgGrey,
-        border: `1px solid ${colors.bgCard}`,
+        background: theme.surface,
+        border: `1px solid ${theme.border}`,
         borderRadius: 8,
         padding: 16,
         marginTop: 16,
@@ -111,12 +111,12 @@ function StepDetail({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <strong>{agent?.name ?? step.agentId}</strong>
-          <div style={{ fontSize: 12, color: colors.muted }}>{agent?.role}</div>
+          <div style={{ fontSize: 12, color: theme.textMuted }}>{agent?.role}</div>
         </div>
         <StatusBadge status={step.status} />
       </div>
 
-      <div style={{ display: "flex", gap: 24, margin: "12px 0", fontSize: 12, color: colors.muted }}>
+      <div style={{ display: "flex", gap: 24, margin: "12px 0", fontSize: 12, color: theme.textMuted }}>
         <span>Model: {agent?.model ?? "-"}</span>
         <span>Input tokens: {step.usage?.inputTokens ?? "-"}</span>
         <span>Output tokens: {step.usage?.outputTokens ?? "-"}</span>
@@ -125,16 +125,16 @@ function StepDetail({
       </div>
 
       {step.error ? (
-        <div style={{ color: colors.danger, marginBottom: 12 }}>Error: {step.error}</div>
+        <div style={{ color: theme.danger, marginBottom: 12 }}>Error: {step.error}</div>
       ) : null}
 
       {agent?.systemInstructions ? (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 4 }}>System instructions</div>
+          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>System instructions</div>
           <div
             style={{
-              background: colors.bgBlack,
-              border: `1px solid ${colors.bgCard}`,
+              background: theme.codeBg,
+              border: `1px solid ${theme.border}`,
               borderRadius: 6,
               padding: 10,
               fontSize: 12,
@@ -149,7 +149,7 @@ function StepDetail({
 
       {context.length > 0 ? (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 4 }}>
+          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>
             Context from previous steps
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -167,18 +167,18 @@ function StepDetail({
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 4 }}>Input</div>
+          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>Input</div>
           <JsonBlock value={step.input} />
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 4 }}>Output</div>
+          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>Output</div>
           <JsonBlock value={step.output ?? null} />
         </div>
       </div>
 
       {step.toolCalls.length > 0 ? (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 4 }}>Tool calls</div>
+          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>Tool calls</div>
           {step.toolCalls.map((call, index) => (
             <div
               key={index}
@@ -212,7 +212,7 @@ function Breadcrumb({ items }: { items: { label: string; onClick?: () => void }[
                 style={{
                   background: "none",
                   border: "none",
-                  color: colors.accent,
+                  color: theme.primary,
                   cursor: "pointer",
                   padding: 0,
                   fontSize: 13,
@@ -221,9 +221,9 @@ function Breadcrumb({ items }: { items: { label: string; onClick?: () => void }[
                 {item.label}
               </button>
             ) : (
-              <span style={{ color: isLast ? colors.secondary : colors.muted }}>{item.label}</span>
+              <span style={{ color: isLast ? theme.text : theme.textMuted }}>{item.label}</span>
             )}
-            {!isLast ? <span style={{ color: colors.muted }}>/</span> : null}
+            {!isLast ? <span style={{ color: theme.textMuted }}>/</span> : null}
           </span>
         );
       })}
@@ -277,7 +277,7 @@ function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
         <h1 style={{ margin: 0 }}>{flow.name}</h1>
         <StatusBadge status={summary.status} />
       </div>
-      <p style={{ color: colors.muted, marginTop: 4, fontSize: 12 }}>
+      <p style={{ color: theme.textMuted, marginTop: 4, fontSize: 12 }}>
         Started {formatRelative(run.startedAt)} · {run.id}
       </p>
 
@@ -287,19 +287,19 @@ function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
         <Metric label="Estimated cost" value={formatUsd(summary.estimatedCostUsd)} />
         <Metric label="Steps" value={String(run.steps.length)} />
       </div>
-      <div style={{ fontSize: 12, color: colors.muted, marginBottom: 8 }}>
+      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
         {summary.inputTokens.toLocaleString()} in · {summary.outputTokens.toLocaleString()} out ·{" "}
         {summary.modelCallCount} model calls · {summary.toolCallCount} tool calls
       </div>
-      <div style={{ fontSize: 12, color: colors.muted, marginBottom: 4 }}>
-        <span style={{ color: colors.secondary }}>Agents:</span> {agentNames.join(" · ")}
+      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>
+        <span style={{ color: theme.text }}>Agents:</span> {agentNames.join(" · ")}
       </div>
-      <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>
-        <span style={{ color: colors.secondary }}>Models:</span>{" "}
+      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 16 }}>
+        <span style={{ color: theme.text }}>Models:</span>{" "}
         {modelsUsed.length > 0 ? modelsUsed.join(" · ") : "-"}
       </div>
 
-      <div style={{ fontSize: 12, color: colors.muted, marginBottom: 8 }}>
+      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
         {selectedStep
           ? "Flow trace — click another step to switch focus, or the flow name above to zoom out."
           : "Flow trace — click a step to inspect its input, output, tokens and tool calls."}
@@ -325,11 +325,11 @@ function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
                     flex: 1,
                     textAlign: "left",
                     cursor: "pointer",
-                    background: isSelected ? colors.bgCard : colors.bgGrey,
-                    border: `1px solid ${isSelected ? colors.accent : colors.bgCard}`,
+                    background: isSelected ? theme.surfaceSelected : theme.surface,
+                    border: `1px solid ${isSelected ? theme.primary : theme.border}`,
                     borderRadius: 8,
                     padding: 12,
-                    color: colors.secondary,
+                    color: theme.text,
                     opacity: isDimmed ? 0.5 : 1,
                     transition: "opacity 120ms ease, border-color 120ms ease",
                   }}
@@ -338,7 +338,7 @@ function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
                     <strong style={{ fontSize: 13 }}>{agent?.name ?? node.agentId}</strong>
                     <StatusBadge status={step.status} />
                   </div>
-                  <div style={{ fontSize: 12, color: colors.muted, marginTop: 4 }}>
+                  <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>
                     {formatMs(stepLatencyMs)} ·{" "}
                     {step.usage ? `${step.usage.inputTokens + step.usage.outputTokens} tok` : "-"}
                   </div>
@@ -485,7 +485,7 @@ function NewRunDialog({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.6)",
+        background: theme.backdrop,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -495,22 +495,22 @@ function NewRunDialog({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: colors.bgGrey,
-          border: `1px solid ${colors.bgCard}`,
+          background: theme.surface,
+          border: `1px solid ${theme.border}`,
           borderRadius: 12,
           padding: 24,
           width: 520,
           maxWidth: "90vw",
-          color: colors.secondary,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+          color: theme.text,
+          boxShadow: theme.drawerShadow,
         }}
       >
         <h2 style={{ margin: 0, marginBottom: 4 }}>Start execution</h2>
-        <p style={{ color: colors.muted, marginTop: 0, marginBottom: 20, fontSize: 13 }}>
+        <p style={{ color: theme.textMuted, marginTop: 0, marginBottom: 20, fontSize: 13 }}>
           Pick a flow and provide the input payload. The run appears in the list immediately.
         </p>
 
-        <label style={{ display: "block", fontSize: 12, color: colors.muted, marginBottom: 6 }}>
+        <label style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>
           Flow
         </label>
         <select
@@ -520,9 +520,9 @@ function NewRunDialog({
             width: "100%",
             padding: "8px 10px",
             marginBottom: 16,
-            background: colors.bgBlack,
-            color: colors.secondary,
-            border: `1px solid ${colors.bgCard}`,
+            background: theme.codeBg,
+            color: theme.text,
+            border: `1px solid ${theme.border}`,
             borderRadius: 6,
             fontSize: 14,
           }}
@@ -533,11 +533,11 @@ function NewRunDialog({
             </option>
           ))}
         </select>
-        <div style={{ fontSize: 12, color: colors.muted, marginTop: -12, marginBottom: 16 }}>
+        <div style={{ fontSize: 12, color: theme.textMuted, marginTop: -12, marginBottom: 16 }}>
           {flow.description}
         </div>
 
-        <label style={{ display: "block", fontSize: 12, color: colors.muted, marginBottom: 6 }}>
+        <label style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>
           Input (JSON)
         </label>
         <textarea
@@ -550,18 +550,18 @@ function NewRunDialog({
           style={{
             width: "100%",
             padding: 10,
-            background: colors.bgBlack,
-            color: colors.secondary,
-            border: `1px solid ${error ? colors.danger : colors.bgCard}`,
+            background: theme.codeBg,
+            color: theme.text,
+            border: `1px solid ${error ? theme.danger : theme.border}`,
             borderRadius: 6,
-            fontFamily: "ui-monospace, SFMono-Regular, monospace",
+            fontFamily: theme.fontMono,
             fontSize: 12,
             resize: "vertical",
             boxSizing: "border-box",
           }}
         />
         {error && (
-          <div style={{ color: colors.danger, fontSize: 12, marginTop: 6 }}>{error}</div>
+          <div style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{error}</div>
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
@@ -571,9 +571,9 @@ function NewRunDialog({
             style={{
               padding: "8px 16px",
               borderRadius: 6,
-              border: `1px solid ${colors.bgCard}`,
+              border: `1px solid ${theme.border}`,
               background: "transparent",
-              color: colors.secondary,
+              color: theme.text,
               cursor: "pointer",
               fontSize: 13,
             }}
@@ -586,9 +586,9 @@ function NewRunDialog({
             style={{
               padding: "8px 16px",
               borderRadius: 6,
-              border: `1px solid ${colors.accent}`,
-              background: colors.accent,
-              color: colors.bgBlack,
+              border: `1px solid ${theme.primary}`,
+              background: theme.primary,
+              color: theme.onPrimary,
               cursor: "pointer",
               fontSize: 13,
               fontWeight: 600,
@@ -714,7 +714,7 @@ export function RunsView() {
       >
         <div>
           <h1 style={{ margin: 0 }}>Runs</h1>
-          <p style={{ color: colors.muted, marginTop: 4 }}>
+          <p style={{ color: theme.textMuted, marginTop: 4 }}>
             Recent flow executions. Click a run to drill into its trace and agents.
           </p>
         </div>
@@ -724,9 +724,9 @@ export function RunsView() {
           style={{
             padding: "10px 18px",
             borderRadius: 8,
-            border: `1px solid ${colors.accent}`,
-            background: colors.accent,
-            color: colors.bgBlack,
+            border: `1px solid ${theme.primary}`,
+            background: theme.primary,
+            color: theme.onPrimary,
             cursor: "pointer",
             fontSize: 14,
             fontWeight: 600,
@@ -737,12 +737,12 @@ export function RunsView() {
         </button>
       </div>
       {!hydrated ? (
-        <p style={{ color: colors.muted }}>Loading…</p>
+        <p style={{ color: theme.textMuted }}>Loading…</p>
       ) : runs.length === 0 ? (
-        <p style={{ color: colors.muted, marginTop: 24 }}>
+        <p style={{ color: theme.textMuted, marginTop: 24 }}>
           No runs yet. Click <strong>Start execution</strong> to kick one off.
         </p>
-      ) : (
+      ) : (  
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
           {[...runs]
             .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
@@ -767,16 +767,16 @@ export function RunsView() {
                   gap: 12,
                   textAlign: "left",
                   cursor: "pointer",
-                  background: colors.bgGrey,
-                  border: `1px solid ${colors.bgCard}`,
+                  background: theme.surface,
+                  border: `1px solid ${theme.border}`,
                   borderRadius: 8,
                   padding: 12,
-                  color: colors.secondary,
+                  color: theme.text,
                 }}
               >
                 <div>
                   <strong>{findFlow(run.flowId)?.name ?? run.flowId}</strong>
-                  <div style={{ fontSize: 12, color: colors.muted }}>
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>
                     {formatRelative(run.startedAt)} · {run.steps.length} steps
                   </div>
                 </div>
@@ -797,9 +797,9 @@ export function RunsView() {
                     style={{
                       padding: "6px 10px",
                       borderRadius: 6,
-                      border: `1px solid ${colors.danger}`,
-                      background: colors.bgBlack,
-                      color: colors.danger,
+                      border: `1px solid ${theme.danger}`,
+                      background: theme.codeBg,
+                      color: theme.danger,
                       cursor: "pointer",
                       fontSize: 12,
                       fontWeight: 600,
@@ -818,9 +818,9 @@ export function RunsView() {
                     style={{
                       padding: "6px 10px",
                       borderRadius: 6,
-                      border: `1px solid ${colors.bgCard}`,
-                      background: colors.bgBlack,
-                      color: colors.accent,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.codeBg,
+                      color: theme.primary,
                       cursor: "pointer",
                       fontSize: 12,
                       fontWeight: 600,

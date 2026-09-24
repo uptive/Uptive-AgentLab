@@ -43,6 +43,12 @@ Agents are read from MongoDB and kept in two-way sync with `data/agents/*.json` 
 
 Copy `.env.example` to `.env` in the repo root and fill in `MONGODB_URI` (optionally `MONGODB_DB`, default `agentlab`). `.env` is gitignored — never commit credentials.
 
+## Theming (light / dark)
+
+All colors, shadows and fonts live in `apps/desktop/src/theme.css` as CSS variables, with one block for light and one for dark. The sidebar button switches `data-theme` on `<html>`; the choice is remembered, and until one is made the OS setting is followed.
+
+In components, never hard-code colors. Use the `theme` tokens from `apps/desktop/src/theme.ts` (e.g. `style={{ color: theme.textSecondary }}`) or `var(--color-...)` in CSS. Plain `h1`/`p`/form elements are already themed by the base styles. To add a token, add it to both blocks in `theme.css` and to `theme` in `theme.ts`.
+
 ## Run the desktop app (dev mode)
 
 ```bash

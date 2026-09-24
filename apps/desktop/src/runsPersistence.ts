@@ -1,6 +1,6 @@
 import type { PersistedState, RunPersistenceAdapter } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
-import type { AgentLabApi } from "../electron/preload.js";
+import type { AgentLabApi } from "../electron/api.js";
 
 // The Electron preload always exposes window.agentlab, but in a plain browser
 // preview it is absent. The global type declares it as non-optional (see

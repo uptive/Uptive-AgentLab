@@ -1,4 +1,4 @@
-import type { AgentLabApi } from "../electron/preload.js";
+import type { AgentLabApi } from "../electron/api.js";
 
 declare global {
   interface Window {

@@ -1,10 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { IPC, type AgentLabApi } from "./api.js";
 import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 
-// Typed IPC bridge. Agents live in MongoDB via the main process. Telemetry exposes
-// both the async CRUD API (for future main-process producers) and the load/save
-// adapter used by the renderer's sync TelemetryStore.
+// Agents live in MongoDB via the main process. Telemetry exposes both the async CRUD
+// API (for future main-process producers) and the load/save adapter used by the
+// renderer's sync TelemetryStore.
 const agents: AgentStore = {
   list: () => ipcRenderer.invoke("agents:list"),
   get: (id: string) => ipcRenderer.invoke("agents:get", id),
@@ -26,8 +27,23 @@ const telemetry: AsyncTelemetryStore & {
   save: (state: PersistedState) => ipcRenderer.invoke("telemetry:save", state),
 };
 
-const api = { agents, telemetry };
-
-export type AgentLabApi = typeof api;
+const api: AgentLabApi = {
+  projects: {
+    list: () => ipcRenderer.invoke(IPC.listProjects),
+    create: (name) => ipcRenderer.invoke(IPC.createProject, name),
+    add: () => ipcRenderer.invoke(IPC.addProjects),
+    remove: (filePath) => ipcRenderer.invoke(IPC.removeProject, filePath),
+    reveal: (filePath) => ipcRenderer.invoke(IPC.revealProject, filePath),
+  },
+  flows: {
+    read: (filePath) => ipcRenderer.invoke(IPC.readFlow, filePath),
+    write: (filePath, json) => ipcRenderer.invoke(IPC.writeFlow, filePath, json),
+  },
+  agents,
+  telemetry,
+  optimization: {
+    generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),
+  },
+};
 
 contextBridge.exposeInMainWorld("agentlab", api);
