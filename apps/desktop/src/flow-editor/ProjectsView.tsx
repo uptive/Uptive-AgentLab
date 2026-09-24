@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import type { ProjectEntry, ProjectsState } from "../../electron/api.js";
-import { colors } from "../theme.js";
+import { alpha, theme } from "../theme.js";
 import { bridge, errorMessage } from "./bridge.js";
 import { STATUS_COLORS } from "./EditorContext.js";
-import { buttonBase } from "./styles.js";
+import { buttonBase, primaryButton } from "./styles.js";
 
 interface Props {
   onOpen: (entry: ProjectEntry, content: string) => void;
@@ -72,7 +72,7 @@ export function ProjectsView({ onOpen }: Props) {
         <button style={buttonBase} onClick={add}>
           Add existing…
         </button>
-        <button style={{ ...buttonBase, background: colors.accent, color: colors.bgBlack, fontWeight: 600 }} onClick={() => setCreating(true)}>
+        <button style={primaryButton} onClick={() => setCreating(true)}>
           + New flow
         </button>
       </div>
@@ -80,7 +80,7 @@ export function ProjectsView({ onOpen }: Props) {
         Your saved flow definitions. New flows are stored in <code>{state?.flowsDirectory ?? "…"}</code>.
       </p>
 
-      {error ? <div style={{ ...banner, background: `${STATUS_COLORS.failed}22`, color: STATUS_COLORS.failed }}>{error}</div> : null}
+      {error ? <div style={{ ...banner, background: alpha(STATUS_COLORS.failed, 13), color: STATUS_COLORS.failed }}>{error}</div> : null}
 
       {creating ? (
         <form onSubmit={create} style={{ ...card, display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
@@ -90,9 +90,9 @@ export function ProjectsView({ onOpen }: Props) {
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && setCreating(false)}
-            style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: `1px solid ${colors.bgCard}`, background: colors.bgBlack, color: colors.secondary, fontSize: 14 }}
+            style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: `1px solid ${theme.border}`, background: theme.surface, color: theme.text, fontSize: 14 }}
           />
-          <button type="submit" style={{ ...buttonBase, background: colors.accent, color: colors.bgBlack, fontWeight: 600 }}>
+          <button type="submit" style={primaryButton}>
             Create
           </button>
           <button type="button" style={buttonBase} onClick={() => setCreating(false)}>
@@ -104,7 +104,7 @@ export function ProjectsView({ onOpen }: Props) {
       {state && state.flows.length === 0 && !creating ? (
         <div style={{ ...card, textAlign: "center", padding: 40, opacity: 0.8 }}>
           <p style={{ marginTop: 0 }}>No flows yet.</p>
-          <button style={{ ...buttonBase, background: colors.accent, color: colors.bgBlack, fontWeight: 600 }} onClick={() => setCreating(true)}>
+          <button style={primaryButton} onClick={() => setCreating(true)}>
             Create your first flow
           </button>
         </div>
@@ -164,6 +164,13 @@ export function ProjectsView({ onOpen }: Props) {
 const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const formatDate = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-const card: CSSProperties = { padding: 14, borderRadius: 10, background: colors.bgGrey, border: `1px solid ${colors.bgCard}` };
+const card: CSSProperties = {
+  padding: 14,
+  borderRadius: 10,
+  background: theme.surface,
+  border: `1px solid ${theme.border}`,
+  boxShadow: theme.cardShadow,
+  color: theme.text,
+};
 const banner: CSSProperties = { padding: "8px 12px", borderRadius: 6, marginBottom: 12, fontSize: 13 };
-const link: CSSProperties = { background: "none", border: "none", padding: 0, color: colors.accent, cursor: "pointer", fontSize: 12 };
+const link: CSSProperties = { background: "none", border: "none", padding: 0, color: theme.primary, cursor: "pointer", fontSize: 12 };

@@ -1,16 +1,5 @@
 import { useEffect, useState } from "react";
 
-// Fixed dark palette for the flow editor canvas, which doesn't follow the app's light/dark theme.
-export const colors = {
-  accent: "#6EEBA1",
-  secondary: "#FDFDFD",
-  bgBlack: "#202123",
-  bgGrey: "#313131",
-  bgCard: "#505050",
-} as const;
-
-export type ThemeColor = keyof typeof colors;
-
 // Design tokens for inline styles. Each value is a CSS variable defined in theme.css, so it
 // follows the active light/dark theme automatically. Never put raw colors in components.
 export const theme = {
@@ -40,6 +29,11 @@ export const theme = {
   cardShadow: "var(--shadow-card)",
   drawerShadow: "var(--shadow-drawer)",
   backdrop: "var(--color-backdrop)",
+  canvasBg: "var(--color-canvas-bg)",
+  canvasGrid: "var(--color-canvas-grid)",
+  edge: "var(--color-edge)",
+  idle: "var(--color-idle)",
+  nodeShadow: "var(--shadow-node)",
   fontTitle: "var(--font-title)",
   fontBody: "var(--font-body)",
   fontMono: "var(--font-mono)",
@@ -71,6 +65,21 @@ function apply(mode: ThemeMode) {
 /** Call once before the first render so the page never flashes the wrong theme. */
 export function initTheme() {
   apply(storedMode() ?? systemMode());
+}
+
+/** Mixes a token with transparency, e.g. alpha(theme.danger, 13) for a faint tint. */
+export const alpha = (color: string, percent: number) => `color-mix(in srgb, ${color} ${percent}%, transparent)`;
+
+/** The active mode, for libraries that need it as a prop. Follows changes made through useTheme. */
+export function useThemeMode(): ThemeMode {
+  const read = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  const [mode, setMode] = useState<ThemeMode>(read);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setMode(read()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+  return mode;
 }
 
 /** Current mode plus a setter. Choosing a mode remembers it; until then the OS setting is followed. */

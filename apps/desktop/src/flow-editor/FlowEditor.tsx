@@ -17,7 +17,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { FlowDefinition } from "@agentlab/contracts";
 import { dummyAgentRegistry, serializeFlow, topologicalLevels, validateFlow, wouldCreateCycle } from "@agentlab/flow-engine";
-import { colors } from "../theme.js";
+import { alpha, theme, useThemeMode } from "../theme.js";
 import { AgentNode } from "./AgentNode.js";
 import { AgentPalette, AGENT_DRAG_MIME } from "./AgentPalette.js";
 import { bridge, errorMessage } from "./bridge.js";
@@ -70,6 +70,7 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
   const demo = useDemoRun();
   const playing = demo.frame?.playing ?? false;
   const { screenToFlowPosition, fitView } = useReactFlow();
+  const colorMode = useThemeMode();
 
   // ---- Derived state -------------------------------------------------------
   const flow = useMemo(() => graphToFlow(meta, nodes, edges), [meta, nodes, edges]);
@@ -203,16 +204,16 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
   return (
     <EditorContext.Provider value={ctx}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-        <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${colors.bgCard}` }}>
+        <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${theme.border}`, background: theme.surface }}>
           <button style={buttonBase} onClick={close} title="Back to projects">
             ← Projects
           </button>
-          <strong style={{ fontSize: 15, marginLeft: 4 }}>
+          <strong style={{ fontSize: 15, marginLeft: 4, color: theme.title }}>
             {meta.name || "Untitled"}
-            {dirty ? <span title="Unsaved changes" style={{ color: colors.accent }}> •</span> : null}
+            {dirty ? <span title="Unsaved changes" style={{ color: theme.primary }}> •</span> : null}
           </strong>
           <span
-            style={{ fontSize: 11, opacity: 0.5, marginRight: "auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            style={{ fontSize: 11, color: theme.textMuted, marginRight: "auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
             title={filePath}
           >
             {filePath}
@@ -239,8 +240,8 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
             style={{
               padding: "6px 12px",
               fontSize: 12,
-              background: notice.kind === "error" ? `${DANGER}22` : `${colors.accent}18`,
-              color: notice.kind === "error" ? DANGER : colors.secondary,
+              background: notice.kind === "error" ? alpha(DANGER, 13) : alpha(theme.primary, 10),
+              color: notice.kind === "error" ? DANGER : theme.text,
               display: "flex",
               justifyContent: "space-between",
             }}
@@ -271,13 +272,13 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
               nodesConnectable={!playing}
               nodesDraggable={!playing}
               deleteKeyCode={playing ? null : ["Backspace", "Delete"]}
-              colorMode="dark"
+              colorMode={colorMode}
               fitView
               fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
               proOptions={{ hideAttribution: true }}
-              style={{ background: colors.bgBlack }}
+              style={{ background: theme.canvasBg }}
             >
-              <Background color={colors.bgCard} gap={20} />
+              <Background color={theme.canvasGrid} gap={20} />
               <Controls>
                 <ControlButton onClick={autoLayout} disabled={playing || nodes.length === 0} title="Auto-layout" aria-label="Auto-layout">
                   <AutoLayoutIcon />
@@ -286,12 +287,12 @@ function FlowEditorInner({ filePath, initialFlow, onClose }: Props) {
               <MiniMap
                 pannable
                 zoomable
-                style={{ background: colors.bgGrey }}
-                nodeColor={(n) => (demo.frame ? DEMO_COLORS[demo.frame.nodes[n.id]?.state ?? "idle"] : colors.bgCard)}
+                style={{ background: theme.surface }}
+                nodeColor={(n) => (demo.frame ? DEMO_COLORS[demo.frame.nodes[n.id]?.state ?? "idle"] : theme.border)}
               />
             </ReactFlow>
             {nodes.length === 0 ? (
-              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", opacity: 0.5, textAlign: "center" }}>
+              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: theme.textMuted, textAlign: "center" }}>
                 Drag agents from the left onto the canvas.
                 <br />
                 Connect the right handle of a step to the left handle of the next one.

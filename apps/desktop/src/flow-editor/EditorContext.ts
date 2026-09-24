@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import type { AgentDefinition } from "@agentlab/contracts";
-import { colors } from "../theme.js";
+import { theme } from "../theme.js";
 import type { DemoFrame } from "./useDemoRun.js";
 
 export interface EditorContextValue {
@@ -21,14 +21,14 @@ export const EditorContext = createContext<EditorContextValue>({
 
 export const useEditorContext = () => useContext(EditorContext);
 
-export const DANGER = "#ff6b6b";
-export const WARNING = "#f5c451";
+export const DANGER = theme.danger;
+export const WARNING = theme.warning;
 
 export const DEMO_COLORS = {
-  idle: "#6a6a6a",
+  idle: theme.idle,
   waiting: WARNING,
   running: WARNING,
-  done: colors.accent,
+  done: theme.primary,
 } as const;
 
 // Kept for places that just need an error colour.
