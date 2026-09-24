@@ -1,5 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeType, EvaluationResult, Recommendation, RecommendationCategory, RecommendationChange } from "@agentlab/contracts";
+import { useEffect, useRef, useState } from "react";
+import {
+  RECOMMENDATION_TAGS,
+  type ChangeType,
+  type EvaluationResult,
+  type Recommendation,
+  type RecommendationCategory,
+  type RecommendationChange,
+  type RecommendationTag,
+} from "@agentlab/contracts";
 import {
   CATEGORIES,
   DEFAULT_EVALUATOR_MODEL,
@@ -11,6 +19,7 @@ import {
   type EvaluatorProgress,
   type ModelClient,
 } from "@agentlab/optimization";
+import { SeverityIcon, TagIcon, TagList } from "../optimize/badges.js";
 import { modelClient } from "../optimize/modelClient.js";
 import { runSource, type RunSummary } from "../optimize/runSource.js";
 import "./OptimizeView.css";
@@ -71,6 +80,7 @@ export function OptimizeView() {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string>();
   const [categoryFilter, setCategoryFilter] = useState<RecommendationCategory>();
+  const [tagFilter, setTagFilter] = useState<RecommendationTag>();
   const [nodeFilter, setNodeFilter] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [defaultModel, setDefaultModel] = useState(loadDefaultModel);
@@ -106,6 +116,7 @@ export function OptimizeView() {
     setNow(started);
     setError(undefined);
     setCategoryFilter(undefined);
+    setTagFilter(undefined);
     setNodeFilter(undefined);
     try {
       const loaded = await runSource.loadRun(selectedRunId);
@@ -141,18 +152,21 @@ export function OptimizeView() {
 
   function focusRecommendation(id: string) {
     setCategoryFilter(undefined);
+    setTagFilter(undefined);
     setNodeFilter(undefined);
     setExpanded((current) => new Set(current).add(id));
     requestAnimationFrame(() => document.getElementById(`rec-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
   }
 
-  const visible = useMemo(
-    () =>
-      (result?.recommendations ?? []).filter(
-        (r) => (!categoryFilter || r.category === categoryFilter) && (!nodeFilter || (r.target.kind === "node" && r.target.nodeId === nodeFilter)),
-      ),
-    [result, categoryFilter, nodeFilter],
-  );
+  // Category and tag filters combine: each list counts what the other filter (and the step filter) leaves.
+  const matchesNode = (r: Recommendation) => !nodeFilter || (r.target.kind === "node" && r.target.nodeId === nodeFilter);
+  const matchesCategory = (r: Recommendation) => !categoryFilter || r.category === categoryFilter;
+  const matchesTag = (r: Recommendation) => !tagFilter || (r.tags ?? []).includes(tagFilter);
+  const all = result?.recommendations ?? [];
+  const visible = all.filter((r) => matchesNode(r) && matchesCategory(r) && matchesTag(r));
+  const categoryCount = (category: RecommendationCategory) => all.filter((r) => r.category === category && matchesNode(r) && matchesTag(r)).length;
+  const tagCount = (tag: RecommendationTag) => all.filter((r) => (r.tags ?? []).includes(tag) && matchesNode(r) && matchesCategory(r)).length;
+  const usedTags = RECOMMENDATION_TAGS.filter((tag) => all.some((r) => r.tags?.includes(tag)));
 
   return (
     <div className="opt">
@@ -228,15 +242,15 @@ export function OptimizeView() {
               <h2>Recommendations</h2>
               <div className="opt-filters" role="group" aria-label="Filter by category">
                 <button aria-pressed={!categoryFilter} onClick={() => setCategoryFilter(undefined)}>
-                  All<span className="count">{result.recommendations.length}</span>
+                  All<span className="count">{all.filter((r) => matchesNode(r) && matchesTag(r)).length}</span>
                 </button>
                 {CATEGORIES.map((category) => {
-                  const count = result.summary.byCategory[category].count;
+                  const count = categoryCount(category);
                   return (
                     <button
                       key={category}
                       aria-pressed={categoryFilter === category}
-                      disabled={count === 0}
+                      disabled={count === 0 && categoryFilter !== category}
                       onClick={() => setCategoryFilter(categoryFilter === category ? undefined : category)}
                     >
                       {CATEGORY_LABELS[category]}
@@ -246,6 +260,29 @@ export function OptimizeView() {
                 })}
               </div>
             </div>
+
+            {usedTags.length ? (
+              <div className="opt-tag-filters" role="group" aria-label="Filter by tag">
+                <span className="opt-tag-filters-label" aria-hidden="true">
+                  Tags
+                </span>
+                {usedTags.map((tag) => {
+                  const count = tagCount(tag);
+                  return (
+                    <button
+                      key={tag}
+                      aria-pressed={tagFilter === tag}
+                      disabled={count === 0 && tagFilter !== tag}
+                      onClick={() => setTagFilter(tagFilter === tag ? undefined : tag)}
+                    >
+                      <TagIcon tag={tag} />
+                      {tag}
+                      <span className="count">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
 
             {nodeFilter ? (
               <p className="opt-node-filter">
@@ -304,6 +341,16 @@ function percentChange(before: number, after: number): string {
 
 function Impact({ recommendation }: { recommendation: Recommendation }) {
   const { text, gain } = headlineImpact(recommendation);
+  const { quality } = recommendation.estimatedImpact;
+  if (!text && quality) {
+    // Only a quality risk to show: its level as an icon, not as "high risk" text.
+    return (
+      <span className="opt-impact risk">
+        <SeverityIcon severity={quality.risk} label={`${quality.risk[0].toUpperCase()}${quality.risk.slice(1)} quality risk`} size={12} />
+        <span aria-hidden="true">risk</span>
+      </span>
+    );
+  }
   return <span className={`opt-impact${gain ? "" : " risk"}`}>{text}</span>;
 }
 
@@ -318,7 +365,6 @@ function headlineImpact(r: Recommendation): { text: string; gain: boolean } {
   if (speed && speed.latencyMs < 0) return { text: `${signed(seconds(speed.latencyMs), speed.latencyMs)} run`, gain: true };
   if (reliability) return { text: `−${reliability.retriesAvoided} retr${reliability.retriesAvoided === 1 ? "y" : "ies"}`, gain: true };
   if (cost) return { text: `+${cost.percent}% cost`, gain: false };
-  if (quality) return { text: `${quality.risk} risk`, gain: false };
   return { text: "", gain: false };
 }
 
@@ -456,7 +502,10 @@ function FixFirst({ result, onSelect }: { result: EvaluationResult; onSelect: (i
             <button onClick={() => onSelect(r.id)}>
               <span className="opt-top-title">{withInlineCode(r.title)}</span>
               <span className="opt-top-meta">
-                {CATEGORY_LABELS[r.category]} · <span className="mono">{targetLabel(r)}</span> · {r.severity} severity
+                <SeverityIcon severity={r.severity} size={12} />
+                <span className="opt-category">{CATEGORY_LABELS[r.category]}</span>
+                <TagList tags={r.tags} />
+                <span className="mono">{targetLabel(r)}</span>
               </span>
               <Impact recommendation={r} />
             </button>
@@ -484,8 +533,11 @@ function RecommendationItem({
   return (
     <li id={`rec-${r.id}`} className="opt-item">
       <button className="opt-row" aria-expanded={expanded} aria-controls={detailId} onClick={onToggle}>
-        <span className={`opt-sev ${r.severity}`} title={`${r.severity} severity`} />
-        <span className="opt-row-title">{withInlineCode(r.title)}</span>
+        <SeverityIcon severity={r.severity} />
+        <span className="opt-row-main">
+          <span className="opt-row-title">{withInlineCode(r.title)}</span>
+          <TagList tags={r.tags} />
+        </span>
         <span className="opt-node">{targetLabel(r)}</span>
         <Impact recommendation={r} />
         <svg className="opt-chevron" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">

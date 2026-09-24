@@ -14,6 +14,8 @@
   --bar: color-mix(in srgb, var(--color-text) 22%, transparent);
   --high: var(--color-danger);
   --medium: var(--color-warning);
+  --low: var(--color-status-active);
+  --on-sev: var(--color-surface);
   --mono: var(--font-mono);
 
   max-width: 1040px;
@@ -516,8 +518,47 @@
 
 .opt-top-meta {
   grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* Category: the primary layer. Solid, filled pill; no icon. */
+.opt-category {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Tags: the secondary layer. Outlined, rounded chips with an icon, so they never look like a category. */
+.opt-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.opt-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.opt-tag svg {
+  flex: none;
+  color: var(--faint);
 }
 
 .opt-impact {
@@ -529,6 +570,9 @@
 
 /* Risks are not gains: keep them neutral so mint always means "you save this". */
 .opt-impact.risk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
 }
 
@@ -572,6 +616,52 @@
 
 .opt-filters .count {
   margin-left: 6px;
+  font-family: var(--mono);
+  color: var(--faint);
+}
+
+.opt-tag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.opt-tag-filters-label {
+  margin-right: 4px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.opt-tag-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.opt-tag-filters button:hover:not(:disabled) {
+  color: var(--paper);
+}
+
+.opt-tag-filters button[aria-pressed="true"] {
+  border-color: var(--mint);
+  color: var(--paper);
+}
+
+.opt-tag-filters button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.opt-tag-filters .count {
   font-family: var(--mono);
   color: var(--faint);
 }
@@ -627,7 +717,7 @@
 
 .opt-row {
   display: grid;
-  grid-template-columns: 10px 1fr auto auto 14px;
+  grid-template-columns: 14px 1fr auto auto 14px;
   align-items: center;
   gap: 16px;
   width: 100%;
@@ -648,18 +738,29 @@
 }
 
 .opt-sev {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--faint);
+  display: block;
+  flex: none;
+  color: var(--faint);
 }
 
 .opt-sev.high {
-  background: var(--high);
+  color: var(--high);
 }
 
 .opt-sev.medium {
-  background: var(--medium);
+  color: var(--medium);
+}
+
+.opt-sev.low {
+  color: var(--low);
+}
+
+.opt-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
 }
 
 .opt-row-title {

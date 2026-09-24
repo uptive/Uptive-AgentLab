@@ -138,3 +138,22 @@ describe("analyzeRun with model-backed evaluators", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("tags from model-backed evaluators", () => {
+  it("asks for tags from the fixed list and drops invented ones", async () => {
+    const client = mockClient([qualityFinding({ tags: ["Instructions", "Made-up", "Output", "Instructions"] })]);
+    const [rec] = await createQualityLlmEvaluator(client).evaluate(codeReviewFixture);
+
+    expect(client.requests[0].system).toMatch(/don't invent new tags/);
+    expect(JSON.stringify(client.requests[0].schema)).toContain('"Responsibility"');
+    expect(rec).toMatchObject({ category: "quality", tags: ["Output", "Instructions"] });
+  });
+
+  it("adds the tags a model change measurably affects", async () => {
+    const client = mockClient([
+      { nodeId: "plan", recommendedModel: "claude-haiku-4-5", problem: "P.", suggestion: "S.", severity: "high", tags: [], evidence: [] },
+    ]);
+    const [rec] = await createModelSelectionLlmEvaluator(client).evaluate(codeReviewFixture);
+    expect(rec).toMatchObject({ category: "model-selection", tags: ["Cost", "Speed"] });
+  });
+});

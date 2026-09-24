@@ -1,6 +1,7 @@
 import type { Recommendation, RecommendationChange, RecommendationSeverity } from "@agentlab/contracts";
 import { stepForNode } from "../helpers.js";
 import type { EvaluationInput, Evaluator, ModelClient } from "../types.js";
+import { TAG_INSTRUCTIONS, TAGS_SCHEMA, toTags } from "../tags.js";
 import { excerpt, runTask } from "./llmFacts.js";
 import { brokenHandoffRecommendations, qualityEvaluator, resolveOutputPath } from "./quality.js";
 
@@ -18,6 +19,7 @@ interface QualityFinding {
   problem: string;
   suggestion: string;
   severity: RecommendationSeverity;
+  tags?: string[];
   evidence: string[];
   changeType: QualityChangeType;
   proposal: string;
@@ -39,7 +41,9 @@ For each finding, targetNodeId is the step where the fix belongs (often the prod
 - edit-instructions: proposal is the complete rewritten system instructions for the target agent.
 - edit-input-mapping: proposal is a JSON object (as a JSON string) mapping the target step's input fields to sources, using "$input.<field>" or "<nodeId>.output.<path>".
 - extend-run-input: proposal is a JSON object (as a JSON string) of fields to add to the run input.
-For checks other than handoff, set consumerNodeId and field to "". Titles are short imperative headlines (at most 8 words). expectedEffect is one sentence on what improves.`;
+For checks other than handoff, set consumerNodeId and field to "". Titles are short imperative headlines (at most 8 words). expectedEffect is one sentence on what improves.
+
+${TAG_INSTRUCTIONS}`;
 
 const SCHEMA = {
   type: "object",
@@ -51,7 +55,7 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["check", "targetNodeId", "consumerNodeId", "field", "title", "problem", "suggestion", "severity", "evidence", "changeType", "proposal", "expectedEffect"],
+        required: ["check", "targetNodeId", "consumerNodeId", "field", "title", "problem", "suggestion", "severity", "tags", "evidence", "changeType", "proposal", "expectedEffect"],
         properties: {
           check: { type: "string", enum: ["handoff", "instructions", "task-input", "final-output"] },
           targetNodeId: { type: "string" },
@@ -61,6 +65,7 @@ const SCHEMA = {
           problem: { type: "string" },
           suggestion: { type: "string" },
           severity: { type: "string", enum: ["high", "medium", "low"] },
+          tags: TAGS_SCHEMA,
           evidence: { type: "array", items: { type: "string" } },
           changeType: { type: "string", enum: ["add-output-schema", "edit-instructions", "edit-input-mapping", "extend-run-input"] },
           proposal: { type: "string" },
@@ -175,6 +180,7 @@ export function toQualityRecommendation(input: EvaluationInput, finding: Quality
     id,
     evaluatorId: EVALUATOR_ID,
     category: "quality",
+    tags: toTags(finding.tags ?? []),
     title: finding.title,
     severity: finding.severity,
     target: { kind: "node", nodeId: node.id, agentId: node.agentId },
