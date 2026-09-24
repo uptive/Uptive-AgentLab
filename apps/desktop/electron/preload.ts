@@ -1,15 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type AgentLabApi } from "./api.js";
-import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
+import { IPC, type AgentLabApi, type AgentsApi, type AgentSource } from "./api.js";
+import type { AgentInput, Run, TraceEvent } from "@agentlab/contracts";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 
-// Agents live in MongoDB via the main process. Telemetry exposes both the async CRUD
-// API (for future main-process producers) and the load/save adapter used by the
-// renderer's sync TelemetryStore.
-const agents: AgentStore = {
-  list: () => ipcRenderer.invoke("agents:list"),
+// Agents live in MongoDB or in the local agents folder, both handled by the main process.
+// Telemetry exposes both the async CRUD API (for future main-process producers) and the
+// load/save adapter used by the renderer's sync TelemetryStore.
+const agents: AgentsApi = {
+  list: async () => (await ipcRenderer.invoke("agents:load")).agents,
+  load: (options?: { reloadLocal?: boolean }) => ipcRenderer.invoke("agents:load", options),
   get: (id: string) => ipcRenderer.invoke("agents:get", id),
-  create: (input: AgentInput) => ipcRenderer.invoke("agents:create", input),
+  create: (input: AgentInput, source?: AgentSource) => ipcRenderer.invoke("agents:create", input, source),
   update: (id: string, patch: Partial<AgentInput>) => ipcRenderer.invoke("agents:update", id, patch),
   delete: (id: string) => ipcRenderer.invoke("agents:delete", id),
 };

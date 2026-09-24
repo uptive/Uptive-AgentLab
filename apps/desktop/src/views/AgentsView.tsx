@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import type { AgentDefinition, AgentInput, AgentStatus, ToolRef } from "@agentlab/contracts";
+import type { AgentSource, SourcedAgent } from "../../electron/api.js";
 import { theme } from "../theme.js";
 
 const MODELS = ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-fable-5-1"];
@@ -381,19 +382,115 @@ function AgentCard({ agent, onOpen }: { agent: AgentDefinition; onOpen: () => vo
   );
 }
 
+const SOURCE_LABELS: Record<AgentSource, string> = { local: "Local", database: "Database" };
+
+const SOURCE_HINTS: Record<AgentSource, string> = {
+  local: "JSON file in data/local-agents/, only on this computer",
+  database: "MongoDB, shared with the team",
+};
+
+function SourcePicker({
+  value,
+  onChange,
+  databaseError,
+}: {
+  value: AgentSource;
+  onChange: (source: AgentSource) => void;
+  databaseError?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label="Save to" style={{ marginBottom: 18 }}>
+      <span style={{ display: "block", fontSize: 13, fontWeight: 500, color: theme.textSecondary, marginBottom: 6 }}>
+        Save to
+      </span>
+      <div style={twoColumns}>
+        {(["local", "database"] as const).map((source) => {
+          const selected = value === source;
+          const unavailable = source === "database" && !!databaseError;
+          return (
+            <button
+              key={source}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={unavailable}
+              onClick={() => onChange(source)}
+              style={{
+                textAlign: "left",
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: `${selected ? 2 : 1}px solid ${selected ? theme.primary : theme.border}`,
+                background: theme.surface,
+                color: theme.text,
+                font: "inherit",
+                cursor: unavailable ? "not-allowed" : "pointer",
+                opacity: unavailable ? 0.5 : 1,
+              }}
+            >
+              <span style={{ display: "block", fontWeight: 600, fontSize: 14 }}>{SOURCE_LABELS[source]}</span>
+              <span style={{ display: "block", fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+                {unavailable ? "MongoDB is unreachable" : SOURCE_HINTS[source]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AgentSection({
+  title,
+  hint,
+  agents,
+  notice,
+  onOpen,
+}: {
+  title: string;
+  hint: string;
+  agents: SourcedAgent[];
+  notice?: ReactNode;
+  onOpen: (agent: SourcedAgent) => void;
+}) {
+  return (
+    <section style={{ marginBottom: 28 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
+        <h2 style={{ ...titleStyle, fontSize: 18 }}>{title}</h2>
+        <span style={{ fontSize: 13, color: theme.textMuted }}>
+          {agents.length} · {hint}
+        </span>
+      </div>
+      {notice}
+      {agents.length === 0 ? (
+        notice ? null : <p style={{ color: theme.textMuted, margin: 0 }}>No agents yet.</p>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 14 }}>
+          {agents.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} onOpen={() => onOpen(agent)} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function AgentsView() {
-  const [agents, setAgents] = useState<AgentDefinition[]>([]);
+  const [agents, setAgents] = useState<SourcedAgent[]>([]);
+  const [databaseError, setDatabaseError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   // undefined = drawer closed, null = creating, agent = editing
-  const [editing, setEditing] = useState<AgentDefinition | null>();
+  const [editing, setEditing] = useState<SourcedAgent | null>();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [saveTo, setSaveTo] = useState<AgentSource>("database");
   const [saving, setSaving] = useState(false);
 
-  async function refresh() {
+  async function refresh(reloadLocal = false) {
     setLoading(true);
     try {
-      setAgents(await window.agentlab.agents.list());
+      const listing = await window.agentlab.agents.load({ reloadLocal });
+      setAgents(listing.agents);
+      setDatabaseError(listing.databaseError ? errorMessage(listing.databaseError) : undefined);
       setError(undefined);
     } catch (e) {
       setError(errorMessage(e));
@@ -419,9 +516,10 @@ export function AgentsView() {
     setError(undefined);
     setEditing(null);
     setForm(EMPTY_FORM);
+    setSaveTo(databaseError ? "local" : "database");
   }
 
-  function openEdit(agent: AgentDefinition) {
+  function openEdit(agent: SourcedAgent) {
     setError(undefined);
     setEditing(agent);
     setForm(toForm(agent));
@@ -435,7 +533,7 @@ export function AgentsView() {
       if (editing) {
         await window.agentlab.agents.update(editing.id, input);
       } else {
-        await window.agentlab.agents.create(input);
+        await window.agentlab.agents.create(input, saveTo);
       }
       setEditing(undefined);
       await refresh();
@@ -446,7 +544,7 @@ export function AgentsView() {
     }
   }
 
-  async function handleDelete(agent: AgentDefinition) {
+  async function handleDelete(agent: SourcedAgent) {
     try {
       await window.agentlab.agents.delete(agent.id);
       if (editing?.id === agent.id) setEditing(undefined);
@@ -458,6 +556,9 @@ export function AgentsView() {
 
   const set = (key: keyof FormState) => (e: { target: { value: string } }) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
+  const localAgents = agents.filter((agent) => agent.source === "local");
+  const databaseAgents = agents.filter((agent) => agent.source === "database");
 
   const modelOptions = MODELS.includes(form.model) || !form.model ? MODELS : [form.model, ...MODELS];
 
@@ -479,8 +580,9 @@ export function AgentsView() {
         <div style={{ display: "flex", gap: 8 }}>
           <button
             style={{ ...ghostButton, padding: "10px 20px", fontSize: 15, opacity: loading ? 0.6 : 1 }}
-            onClick={() => void refresh()}
+            onClick={() => void refresh(true)}
             disabled={loading}
+            title="Reload agents from MongoDB and re-read data/local-agents/"
           >
             {loading ? "Refreshing…" : "Refresh"}
           </button>
@@ -494,14 +596,28 @@ export function AgentsView() {
 
       {loading && agents.length === 0 ? (
         <p style={{ color: theme.textMuted }}>Loading agents…</p>
-      ) : agents.length === 0 ? (
-        <p style={{ color: theme.textMuted }}>No agents yet.</p>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 14 }}>
-          {agents.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} onOpen={() => openEdit(agent)} />
-          ))}
-        </div>
+        <>
+          <AgentSection
+            title="Local"
+            hint="JSON files in data/local-agents/, not committed"
+            agents={localAgents}
+            onOpen={openEdit}
+          />
+          <AgentSection
+            title="Database"
+            hint="shared through MongoDB"
+            agents={databaseAgents}
+            onOpen={openEdit}
+            notice={
+              databaseError ? (
+                <p style={{ margin: "0 0 12px", fontSize: 14, color: theme.errorText }}>
+                  Could not reach MongoDB: {databaseError}
+                </p>
+              ) : undefined
+            }
+          />
+        </>
       )}
 
       {drawerOpen ? (
@@ -544,7 +660,9 @@ export function AgentsView() {
                   {editing ? editing.name : "New agent"}
                 </h2>
                 {editing ? (
-                  <span style={{ fontFamily: theme.fontMono, fontSize: 12, color: theme.textMuted }}>{editing.id}</span>
+                  <span style={{ fontFamily: theme.fontMono, fontSize: 12, color: theme.textMuted }}>
+                    {SOURCE_LABELS[editing.source]} · {editing.id}
+                  </span>
                 ) : null}
               </div>
               <button
@@ -559,6 +677,10 @@ export function AgentsView() {
 
             <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
               {error ? <ErrorBanner message={error} onDismiss={() => setError(undefined)} /> : null}
+
+              {editing ? null : (
+                <SourcePicker value={saveTo} onChange={setSaveTo} databaseError={databaseError} />
+              )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 12 }}>
                 <Field label="Name *">
