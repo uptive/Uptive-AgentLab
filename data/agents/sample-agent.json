@@ -1,0 +1,14 @@
+{
+  "createdAt": "2026-09-24T12:45:08.340Z",
+  "updatedAt": "2026-09-24T13:09:47.761Z",
+  "name": "sample",
+  "role": "researcher",
+  "status": "active",
+  "description": "asdfs",
+  "model": "claude-sonnet-5",
+  "modelSettings": {},
+  "systemInstructions": "asdf",
+  "tools": [],
+  "limits": {},
+  "id": "ae1e95ea-6b95-47c1-87f3-6776b62b2504"
+}

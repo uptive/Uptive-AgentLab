@@ -1,5 +1,8 @@
 /** Shared contract for the preload bridge (`window.agentlab`). Types only + channel names. */
 
+import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
+import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
+
 /** A flow file registered in the editor configuration. */
 export interface ProjectEntry {
   filePath: string;
@@ -36,6 +39,12 @@ export interface AgentLabApi {
     read(filePath: string): Promise<string>;
     /** Writes a registered flow file. */
     write(filePath: string, json: string): Promise<ProjectEntry>;
+  };
+  agents: AgentStore;
+  /** Telemetry CRUD plus the load/save snapshot adapter used by the renderer's sync TelemetryStore. */
+  telemetry: AsyncTelemetryStore & {
+    load(): Promise<PersistedState | null>;
+    save(state: PersistedState): Promise<void>;
   };
 }
 

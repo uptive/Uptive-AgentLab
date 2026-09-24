@@ -14,3 +14,5 @@ export const engine = createFlowEngine({
   runtime: createMockRuntime(),
   resolveAgent: dummyAgentRegistry.get,
 });
+
+export * from "./demo.js";
