@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { AgentDefinition, FlowDefinition, Run, RunStatus, StepRun } from "@agentlab/contracts";
+import { useCallback, useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
+import type { AgentDefinition, FlowDefinition, Run, RunStatus, StepRun, TraceEvent } from "@agentlab/contracts";
 import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
-import { computeFlowLayers, demoFlow } from "@agentlab/flow-engine";
+import { findFlow, validateFlow } from "@agentlab/flow-engine";
 import { theme } from "../theme.js";
 import { demoRuns, demoTraceEvents } from "../demoRuns.js";
-import { agentOf, canRunForReal, cancelRun, connectLiveRuns, flowOf, startRun } from "../liveRuns.js";
+import { useCatalog, type Catalog } from "../runs/catalog.js";
+import { formatMs, formatRelative, formatUsd, stepLatencyMs } from "../runs/format.js";
+import { RunGraph } from "../runs/RunGraph.js";
+import { singleAgentFlow, startRun, stopRun } from "../runs/runLauncher.js";
+import { canRunForReal, connectLiveRuns } from "../liveRuns.js";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
   pending: theme.statusDraft,
@@ -12,6 +16,23 @@ const STATUS_COLORS: Record<RunStatus, string> = {
   completed: theme.statusActive,
   failed: theme.danger,
 };
+
+// The agents only see what is in the input (plus an optional folder), so the demo includes the diff.
+const DEFAULT_INPUT = JSON.stringify(
+  {
+    title: "Add user lookup endpoint",
+    description: "Adds findUser so support can look users up by name.",
+    diff: [
+      "diff --git a/src/users.ts b/src/users.ts",
+      "+export async function findUser(db, req) {",
+      "+  const name = req.query.name;",
+      "+  return db.query(\"SELECT * FROM users WHERE name = '\" + name + \"'\");",
+      "+}",
+    ].join("\n"),
+  },
+  null,
+  2,
+);
 
 function StatusBadge({ status }: { status: RunStatus }) {
   return (
@@ -32,28 +53,6 @@ function StatusBadge({ status }: { status: RunStatus }) {
   );
 }
 
-function formatMs(ms: number | undefined): string {
-  if (ms === undefined) return "-";
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
-}
-
-function formatUsd(usd: number): string {
-  return `$${usd.toFixed(4)}`;
-}
-
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(diff)) return "-";
-  const sec = Math.round(diff / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.round(hr / 24);
-  return `${day}d ago`;
-}
-
 function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre
@@ -64,73 +63,205 @@ function JsonBlock({ value }: { value: unknown }) {
         padding: 10,
         fontSize: 12,
         overflow: "auto",
-        maxHeight: 220,
+        maxHeight: 260,
         margin: 0,
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
       }}
     >
-      {JSON.stringify(value, null, 2)}
+      {value === undefined ? "—" : JSON.stringify(value, null, 2)}
     </pre>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, size = 18 }: { label: string; value: string; size?: number }) {
   return (
-    <div>
+    <div style={{ minWidth: 0 }}>
       <div style={{ fontSize: 12, color: theme.textMuted }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 600 }}>{value}</div>
+      <div style={{ fontSize: size, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
     </div>
   );
 }
 
-function StepDetail({
+function SectionLabel({ children }: { children: string }) {
+  return <div style={{ fontSize: 12, color: theme.textMuted, margin: "16px 0 4px" }}>{children}</div>;
+}
+
+const buttonStyle = (variant: "primary" | "secondary" | "danger"): CSSProperties => ({
+  padding: "8px 14px",
+  borderRadius: 6,
+  border: `1px solid ${variant === "primary" ? theme.primary : variant === "danger" ? theme.danger : theme.border}`,
+  background: variant === "primary" ? theme.primary : theme.codeBg,
+  color: variant === "primary" ? theme.onPrimary : variant === "danger" ? theme.danger : theme.primary,
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 600,
+  whiteSpace: "nowrap",
+});
+
+const fieldStyle: CSSProperties = {
+  width: "100%",
+  padding: "8px 10px",
+  background: theme.codeBg,
+  color: theme.text,
+  border: `1px solid ${theme.border}`,
+  borderRadius: 6,
+  fontSize: 14,
+  boxSizing: "border-box",
+};
+
+/** Re-renders every `intervalMs` while `active`, so live durations keep counting. */
+function useNow(active: boolean, intervalMs = 200): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [active, intervalMs]);
+  return active ? now : Date.now();
+}
+
+/** The flow a run executed: its own snapshot, a known flow, or a flat graph rebuilt from its steps. */
+function resolveRunFlow(run: Run, catalog: Catalog): FlowDefinition {
+  return (
+    run.flow ??
+    findFlow(run.flowId, catalog.flows.map((option) => option.flow)) ?? {
+      id: run.flowId,
+      name: run.flowId,
+      nodes: run.steps.map((step) => ({ id: step.nodeId, agentId: step.agentId, dependsOn: [] })),
+    }
+  );
+}
+
+/** The input a run was started with, for reruns. Older runs only have it in their trace. */
+function resolveRunInput(run: Run, events: TraceEvent[]): unknown {
+  if (run.input !== undefined) return run.input;
+  const flowStart = events.find((event) => event.type === "flow_start")?.data as { input?: unknown } | undefined;
+  return flowStart?.input ?? run.steps[0]?.input;
+}
+
+function StepPanel({
   step,
   agent,
+  label,
   context,
+  now,
+  onClose,
 }: {
   step: StepRun;
   agent: AgentDefinition | undefined;
+  label: string;
   context: { agentName: string; output: unknown }[];
+  now: number;
+  onClose: () => void;
 }) {
-  const latencyMs =
-    step.startedAt && step.completedAt
-      ? new Date(step.completedAt).getTime() - new Date(step.startedAt).getTime()
-      : undefined;
+  const usage = step.usage;
+  const latencyMs = usage?.latencyMs ?? stepLatencyMs(step, now);
 
   return (
-    <div
-      style={{
-        background: theme.surface,
-        border: `1px solid ${theme.border}`,
-        borderRadius: 8,
-        padding: 16,
-        marginTop: 16,
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <strong>{agent?.name ?? step.agentId}</strong>
-          <div style={{ fontSize: 12, color: theme.textMuted }}>{agent?.role}</div>
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <strong style={{ fontSize: 16 }}>{label}</strong>
+          <div style={{ fontSize: 12, color: theme.textMuted }}>
+            {agent?.role ?? step.agentId} · {agent?.model ?? "unknown model"}
+          </div>
         </div>
-        <StatusBadge status={step.status} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <StatusBadge status={step.status} />
+          <button
+            onClick={onClose}
+            aria-label="Close agent details"
+            style={{ background: "none", border: "none", color: theme.textMuted, cursor: "pointer", fontSize: 14 }}
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: 24, margin: "12px 0", fontSize: 12, color: theme.textMuted }}>
-        <span>Model: {agent?.model ?? "-"}</span>
-        <span>Input tokens: {step.usage?.inputTokens ?? "-"}</span>
-        <span>Output tokens: {step.usage?.outputTokens ?? "-"}</span>
-        <span>Cost: {step.usage ? formatUsd(step.usage.estimatedCostUsd) : "-"}</span>
-        <span>Latency: {formatMs(latencyMs)}</span>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
+        <Metric label={step.status === "running" ? "Latency (so far)" : "Latency"} value={formatMs(latencyMs)} size={16} />
+        <Metric label="Cost" value={usage ? formatUsd(usage.estimatedCostUsd) : "-"} size={16} />
+        <Metric label="Input tokens" value={usage ? usage.inputTokens.toLocaleString() : "-"} size={16} />
+        <Metric label="Output tokens" value={usage ? usage.outputTokens.toLocaleString() : "-"} size={16} />
       </div>
+      {step.startedAt ? (
+        <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 8 }}>
+          Started {new Date(step.startedAt).toLocaleTimeString()}
+          {step.completedAt ? ` · finished ${new Date(step.completedAt).toLocaleTimeString()}` : ""}
+        </div>
+      ) : null}
 
       {step.error ? (
-        <div style={{ color: theme.danger, marginBottom: 12 }}>Error: {step.error}</div>
+        <div
+          style={{
+            marginTop: 12,
+            padding: 10,
+            borderRadius: 6,
+            background: theme.errorBg,
+            color: theme.errorText,
+            fontSize: 12,
+          }}
+        >
+          {step.error}
+        </div>
+      ) : null}
+
+      {step.status === "pending" ? (
+        <p style={{ fontSize: 12, color: theme.textMuted, marginTop: 16 }}>
+          Waiting for upstream steps to finish — input and output appear once this agent starts.
+        </p>
+      ) : (
+        <>
+          <SectionLabel>Input</SectionLabel>
+          <JsonBlock value={step.input} />
+          <SectionLabel>Output</SectionLabel>
+          {step.status === "running" ? (
+            <div style={{ fontSize: 12, color: theme.textMuted }}>Agent is still running…</div>
+          ) : (
+            <JsonBlock value={step.output} />
+          )}
+        </>
+      )}
+
+      {step.toolCalls.length > 0 ? (
+        <>
+          <SectionLabel>Tool calls</SectionLabel>
+          {step.toolCalls.map((call, index) => (
+            <div key={index} style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 12, marginBottom: 4 }}>
+                <strong>{call.toolId}</strong> (
+                {formatMs(new Date(call.completedAt).getTime() - new Date(call.startedAt).getTime())})
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 8 }}>
+                <JsonBlock value={call.input} />
+                <JsonBlock value={call.output} />
+              </div>
+            </div>
+          ))}
+        </>
+      ) : null}
+
+      {context.length > 0 ? (
+        <>
+          <SectionLabel>Context from previous steps</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {context.map((entry, index) => (
+              <div key={index}>
+                <div style={{ fontSize: 12, marginBottom: 2 }}>
+                  <strong>{entry.agentName}</strong>
+                </div>
+                <JsonBlock value={entry.output ?? null} />
+              </div>
+            ))}
+          </div>
+        </>
       ) : null}
 
       {agent?.systemInstructions ? (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>System instructions</div>
+        <>
+          <SectionLabel>System instructions</SectionLabel>
           <div
             style={{
               background: theme.codeBg,
@@ -144,56 +275,7 @@ function StepDetail({
           >
             {agent.systemInstructions}
           </div>
-        </div>
-      ) : null}
-
-      {context.length > 0 ? (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>
-            Context from previous steps
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {context.map((entry, index) => (
-              <div key={index}>
-                <div style={{ fontSize: 12, marginBottom: 2 }}>
-                  <strong>{entry.agentName}</strong>
-                </div>
-                <JsonBlock value={entry.output ?? null} />
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>Input</div>
-          <JsonBlock value={step.input} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>Output</div>
-          <JsonBlock value={step.output ?? null} />
-        </div>
-      </div>
-
-      {step.toolCalls.length > 0 ? (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>Tool calls</div>
-          {step.toolCalls.map((call, index) => (
-            <div
-              key={index}
-              style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12, marginBottom: 8 }}
-            >
-              <div style={{ fontSize: 12 }}>
-                <strong>{call.toolId}</strong> (
-                {formatMs(new Date(call.completedAt).getTime() - new Date(call.startedAt).getTime())})
-              </div>
-              <div />
-              <JsonBlock value={call.input} />
-              <JsonBlock value={call.output} />
-            </div>
-          ))}
-        </div>
+        </>
       ) : null}
     </div>
   );
@@ -231,126 +313,147 @@ function Breadcrumb({ items }: { items: { label: string; onClick?: () => void }[
   );
 }
 
-function RunDetail({ run, onBack }: { run: Run; onBack: () => void }) {
+function RunDetail({
+  run,
+  catalog,
+  onBack,
+  onRerun,
+}: {
+  run: Run;
+  catalog: Catalog;
+  onBack: () => void;
+  onRerun: (run: Run) => void;
+}) {
   const store = getTelemetryStore();
-  const [selectedStepId, setSelectedStepId] = useState<string | undefined>(undefined);
-  const events = store.listEvents(run.id);
-  const summary = summarizeRun(run, events);
-  const flow: FlowDefinition = flowOf(run);
-  const layers = computeFlowLayers(flow);
-  const selectedStep = run.steps.find((step) => step.id === selectedStepId);
-  const selectedAgent = selectedStep ? agentOf(run, selectedStep.agentId) : undefined;
-  const totalTokens = summary.inputTokens + summary.outputTokens;
-
+  const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>(undefined);
+  const live = run.status === "running";
+  const now = useNow(live);
+  const summary = summarizeRun(run, store.listEvents(run.id));
+  const flow = resolveRunFlow(run, catalog);
   const stepByNodeId = new Map(run.steps.map((step) => [step.nodeId, step]));
-  const agentsInRun = run.steps.map((step) => agentOf(run, step.agentId) ?? undefined);
-  const agentNames = Array.from(
-    new Set(agentsInRun.map((agent, index) => agent?.name ?? run.steps[index].agentId)),
-  );
-  const modelsUsed = Array.from(
-    new Set(agentsInRun.map((agent) => agent?.model).filter((model): model is string => Boolean(model))),
-  );
+  const agentName = (agentId: string) => catalog.agentsById.get(agentId)?.name ?? agentId;
 
-  const selectedNode = selectedStep ? flow.nodes.find((node) => node.id === selectedStep.nodeId) : undefined;
+  const completedSteps = run.steps.filter((step) => step.status === "completed").length;
+  const runningSteps = run.steps.filter((step) => step.status === "running");
+  const durationMs = summary.durationMs ?? (live ? now - new Date(run.startedAt).getTime() : undefined);
+
+  const selectedNode = flow.nodes.find((node) => node.id === selectedNodeId);
+  const selectedStep = selectedNodeId ? stepByNodeId.get(selectedNodeId) : undefined;
+  const selectedAgent = selectedStep ? catalog.agentsById.get(selectedStep.agentId) : undefined;
+  const selectedLabel = selectedNode?.label ?? (selectedStep ? agentName(selectedStep.agentId) : "");
   const stepContext = selectedNode
-    ? selectedNode.dependsOn
-        .map((depId) => {
-          const parentStep = stepByNodeId.get(depId);
-          if (!parentStep) return undefined;
-          const parentAgent = agentOf(run, parentStep.agentId);
-          return { agentName: parentAgent?.name ?? parentStep.agentId, output: parentStep.output };
-        })
-        .filter((entry): entry is { agentName: string; output: unknown } => entry !== undefined)
+    ? selectedNode.dependsOn.flatMap((depId) => {
+        const parent = stepByNodeId.get(depId);
+        return parent?.output !== undefined ? [{ agentName: agentName(parent.agentId), output: parent.output }] : [];
+      })
     : [];
 
   const crumbs = [
     { label: "All runs", onClick: onBack },
-    { label: flow.name, onClick: selectedStep ? () => setSelectedStepId(undefined) : undefined },
-    ...(selectedStep && selectedAgent ? [{ label: selectedAgent.name }] : []),
+    { label: flow.name, onClick: selectedStep ? () => setSelectedNodeId(undefined) : undefined },
+    ...(selectedStep ? [{ label: selectedLabel }] : []),
   ];
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <Breadcrumb items={crumbs} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h1 style={{ margin: 0 }}>{flow.name}</h1>
-        <StatusBadge status={summary.status} />
+        <StatusBadge status={run.status} />
+        <div style={{ marginLeft: "auto" }}>
+          {live ? (
+            <button type="button" onClick={() => stopRun(run)} style={buttonStyle("danger")}>
+              ◼ Stop
+            </button>
+          ) : (
+            <button type="button" onClick={() => onRerun(run)} style={buttonStyle("secondary")}>
+              ↻ Rerun
+            </button>
+          )}
+        </div>
       </div>
       <p style={{ color: theme.textMuted, marginTop: 4, fontSize: 12 }}>
         Started {formatRelative(run.startedAt)} · {run.id}
-        {run.authSource ? ` · paid by ${run.authSource === "subscription" ? "Claude subscription" : run.authSource === "api-key" ? "API key" : "unknown"}` : ""}
+        {run.authSource && run.authSource !== "unknown"
+          ? ` · paid by ${run.authSource === "subscription" ? "Claude subscription" : "API key"}`
+          : ""}
       </p>
 
-      <div style={{ display: "flex", gap: 24, margin: "16px 0", flexWrap: "wrap" }}>
-        <Metric label="Duration" value={formatMs(summary.durationMs)} />
-        <Metric label="Total tokens" value={totalTokens.toLocaleString()} />
+      <div style={{ display: "flex", gap: 32, margin: "8px 0 16px", flexWrap: "wrap" }}>
+        <Metric label="Progress" value={`${completedSteps} / ${run.steps.length} steps`} />
+        <Metric label={live ? "Elapsed" : "Duration"} value={formatMs(durationMs)} />
+        <Metric label="Total tokens" value={(summary.inputTokens + summary.outputTokens).toLocaleString()} />
         <Metric label="Estimated cost" value={formatUsd(summary.estimatedCostUsd)} />
-        <Metric label="Steps" value={String(run.steps.length)} />
-      </div>
-      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
-        {summary.inputTokens.toLocaleString()} in · {summary.outputTokens.toLocaleString()} out ·{" "}
-        {summary.modelCallCount} model calls · {summary.toolCallCount} tool calls
-      </div>
-      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>
-        <span style={{ color: theme.text }}>Agents:</span> {agentNames.join(" · ")}
-      </div>
-      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 16 }}>
-        <span style={{ color: theme.text }}>Models:</span>{" "}
-        {modelsUsed.length > 0 ? modelsUsed.join(" · ") : "-"}
+        {live ? (
+          <Metric
+            label="Running now"
+            value={runningSteps.length > 0 ? runningSteps.map((step) => agentName(step.agentId)).join(", ") : "-"}
+          />
+        ) : null}
       </div>
 
-      <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 8 }}>
-        {selectedStep
-          ? "Flow trace — click another step to switch focus, or the flow name above to zoom out."
-          : "Flow trace — click a step to inspect its input, output, tokens and tool calls."}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {layers.map((layer, layerIndex) => (
-          <div key={layerIndex} style={{ display: "flex", gap: 12 }}>
-            {layer.map((node) => {
-              const step = run.steps.find((s) => s.nodeId === node.id);
-              const agent = agentOf(run, node.agentId);
-              if (!step) return null;
-              const isSelected = step.id === selectedStepId;
-              const isDimmed = selectedStepId !== undefined && !isSelected;
-              const stepLatencyMs =
-                step.startedAt && step.completedAt
-                  ? new Date(step.completedAt).getTime() - new Date(step.startedAt).getTime()
-                  : undefined;
-              return (
-                <button
-                  key={node.id}
-                  onClick={() => setSelectedStepId(step.id)}
-                  style={{
-                    flex: 1,
-                    textAlign: "left",
-                    cursor: "pointer",
-                    background: isSelected ? theme.surfaceSelected : theme.surface,
-                    border: `1px solid ${isSelected ? theme.primary : theme.border}`,
-                    borderRadius: 8,
-                    padding: 12,
-                    color: theme.text,
-                    opacity: isDimmed ? 0.5 : 1,
-                    transition: "opacity 120ms ease, border-color 120ms ease",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <strong style={{ fontSize: 13 }}>{agent?.name ?? node.agentId}</strong>
-                    <StatusBadge status={step.status} />
-                  </div>
-                  <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>
-                    {formatMs(stepLatencyMs)} ·{" "}
-                    {step.usage ? `${step.usage.inputTokens + step.usage.outputTokens} tok` : "-"}
-                  </div>
-                </button>
-              );
-            })}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: selectedStep ? "minmax(0, 1fr) 400px" : "minmax(0, 1fr)",
+          gap: 16,
+          flex: 1,
+          minHeight: 420,
+        }}
+      >
+        <div
+          style={{
+            position: "relative",
+            borderRadius: 8,
+            overflow: "hidden",
+            border: `1px solid ${theme.border}`,
+          }}
+        >
+          <RunGraph
+            flow={flow}
+            run={run}
+            agentsById={catalog.agentsById}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={setSelectedNodeId}
+            now={now}
+          />
+          {!selectedStep ? (
+            <div
+              style={{
+                position: "absolute",
+                top: 10,
+                left: 12,
+                fontSize: 12,
+                color: "#fdfdfdaa",
+                pointerEvents: "none",
+              }}
+            >
+              Click an agent to see its input, output, tokens, cost and latency.
+            </div>
+          ) : null}
+        </div>
+        {selectedStep ? (
+          <div
+            style={{
+              background: theme.surface,
+              border: `1px solid ${theme.border}`,
+              borderRadius: 8,
+              padding: 16,
+              overflow: "auto",
+            }}
+          >
+            <StepPanel
+              step={selectedStep}
+              agent={selectedAgent}
+              label={selectedLabel}
+              context={stepContext}
+              now={now}
+              onClose={() => setSelectedNodeId(undefined)}
+            />
           </div>
-        ))}
+        ) : null}
       </div>
-
-      {selectedStep ? <StepDetail step={selectedStep} agent={selectedAgent} context={stepContext} /> : null}
     </div>
   );
 }
@@ -364,183 +467,72 @@ function useRuns(): Run[] {
   );
 }
 
-// Fake-orchestrate a rerun by cloning a run with a new id, showing it as
-// "running" immediately, then flipping it to "completed" after a short delay.
-function buildRerun(source: Run): { running: Run; completed: Run } {
-  const now = Date.now();
-  const newRunId = `run-rerun-${now.toString(36)}`;
-  const running: Run = {
-    ...source,
-    id: newRunId,
-    status: "running",
-    startedAt: new Date(now).toISOString(),
-    completedAt: undefined,
-    steps: source.steps.map((step, i) => ({
-      ...step,
-      id: `${newRunId}-step-${i}`,
-      runId: newRunId,
-      status: "pending",
-      startedAt: undefined,
-      completedAt: undefined,
-      output: undefined,
-      error: undefined,
-    })),
-    totalUsage: undefined,
-  };
-  const completed: Run = {
-    ...running,
-    status: "completed",
-    completedAt: new Date(now + 2000).toISOString(),
-    steps: running.steps.map((step, i) => {
-      const original = source.steps[i];
-      return {
-        ...step,
-        status: "completed",
-        startedAt: new Date(now + i * 200).toISOString(),
-        completedAt: new Date(now + (i + 1) * 200).toISOString(),
-        output: original.output,
-        usage: original.usage,
-        toolCalls: original.toolCalls,
-      };
-    }),
-    totalUsage: source.totalUsage,
-  };
-  return { running, completed };
-}
-
-// Fake-orchestrate a fresh run built straight from a flow definition.
-function buildRunFromFlow(flow: FlowDefinition, input: unknown): { running: Run; completed: Run } {
-  const now = Date.now();
-  const newRunId = `run-${now.toString(36)}`;
-  const steps: StepRun[] = flow.nodes.map((node, i) => ({
-    id: `${newRunId}-step-${i}`,
-    runId: newRunId,
-    nodeId: node.id,
-    agentId: node.agentId,
-    status: "pending",
-    input,
-    toolCalls: [],
-  }));
-  const running: Run = {
-    id: newRunId,
-    flowId: flow.id,
-    status: "running",
-    startedAt: new Date(now).toISOString(),
-    steps,
-  };
-  const completed: Run = {
-    ...running,
-    status: "completed",
-    completedAt: new Date(now + 2000).toISOString(),
-    steps: steps.map((step, i) => ({
-      ...step,
-      status: "completed",
-      startedAt: new Date(now + i * 200).toISOString(),
-      completedAt: new Date(now + (i + 1) * 200).toISOString(),
-      output: { note: `Simulated output from ${step.agentId}` },
-      usage: { inputTokens: 800, outputTokens: 400, estimatedCostUsd: 0.012, latencyMs: 200 },
-    })),
-    totalUsage: {
-      inputTokens: 800 * steps.length,
-      outputTokens: 400 * steps.length,
-      estimatedCostUsd: 0.012 * steps.length,
-      latencyMs: 200 * steps.length,
-    },
-  };
-  return { running, completed };
-}
-
-const DEMO_INPUT = {
-  title: "Add user lookup endpoint",
-  description: "Adds findUser so support can look users up by name.",
-  diff: [
-    "diff --git a/src/users.ts b/src/users.ts",
-    "+export async function findUser(db, req) {",
-    "+  const name = req.query.name;",
-    "+  return db.query(\"SELECT * FROM users WHERE name = '\" + name + \"'\");",
-    "+}",
-  ].join("\n"),
-};
-
-const secondaryButton = {
-  padding: "6px 12px",
-  borderRadius: 6,
-  border: `1px solid ${theme.border}`,
-  background: "transparent",
-  color: theme.text,
-  cursor: "pointer",
-  fontSize: 12,
-} as const;
-
-function errorText(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "");
-}
-
-/** The demo flow plus every flow saved in the Flows view (files and MongoDB). */
-function useRunnableFlows(): FlowDefinition[] {
-  const [flows, setFlows] = useState<FlowDefinition[]>([demoFlow]);
-  useEffect(() => {
-    if (!window.agentlab?.projects) return;
-    let cancelled = false;
-    void (async () => {
-      const { flows: entries } = await window.agentlab.projects.list();
-      const saved: FlowDefinition[] = [];
-      for (const entry of entries.filter((e) => e.status === "ok" && (e.nodeCount ?? 0) > 0)) {
-        try {
-          saved.push(JSON.parse(await window.agentlab.flows.read(entry.filePath)) as FlowDefinition);
-        } catch {
-          // Unreadable flow file: the Flows view shows the problem.
-        }
-      }
-      // Flows saved to MongoDB; skipped when the database is unreachable.
-      const cloud = await window.agentlab.cloudFlows.list().catch(() => []);
-      for (const { createdAt: _c, updatedAt: _u, ...flow } of cloud) if (flow.nodes.length > 0) saved.push(flow);
-      const unique = new Map([demoFlow, ...saved].map((f) => [f.id, f]));
-      if (!cancelled) setFlows([...unique.values()]);
-    })().catch((error) => console.warn("Could not load saved flows:", error));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return flows;
-}
+type RunTarget = "flow" | "agent";
 
 function NewRunDialog({
+  catalog,
   onCancel,
   onStart,
 }: {
+  catalog: Catalog;
   onCancel: () => void;
   onStart: (flow: FlowDefinition, input: unknown, folder?: string) => Promise<void>;
 }) {
-  const flows = useRunnableFlows();
-  const [flowId, setFlowId] = useState<string>(demoFlow.id);
-  const [inputText, setInputText] = useState<string>(JSON.stringify(DEMO_INPUT, null, 2));
   const [folder, setFolder] = useState<string | undefined>(undefined);
-  const [error, setError] = useState<string | undefined>(undefined);
   const [starting, setStarting] = useState(false);
-  const flow = flows.find((f) => f.id === flowId) ?? flows[0];
+  const [target, setTarget] = useState<RunTarget>("flow");
+  const [flowId, setFlowId] = useState<string>(catalog.flows[0]?.flow.id ?? "");
+  const [agentId, setAgentId] = useState<string>(catalog.agents[0]?.id ?? "");
+  const [inputText, setInputText] = useState<string>(DEFAULT_INPUT);
+  const [error, setError] = useState<string | undefined>(undefined);
 
-  const submit = async () => {
+  const flow = catalog.flows.find((option) => option.flow.id === flowId)?.flow;
+  const agent = catalog.agentsById.get(agentId);
+  const chosen = target === "flow" ? flow : agent ? singleAgentFlow(agent) : undefined;
+  const validation = chosen ? validateFlow(chosen, { knownAgentIds: catalog.agentsById.keys() }) : undefined;
+  const problems = validation?.errors.map((issue) => issue.message) ?? [];
+  const canStart = chosen !== undefined && problems.length === 0;
+
+  const submit = () => {
+    if (!chosen || !canStart) return;
     let parsed: unknown = undefined;
     const trimmed = inputText.trim();
     if (trimmed.length > 0) {
       try {
         parsed = JSON.parse(trimmed);
       } catch {
-        // Plain text is a valid task too.
-        parsed = trimmed;
+        setError("Input must be valid JSON (or empty).");
+        return;
       }
     }
     setStarting(true);
-    try {
-      await onStart(flow, parsed, folder);
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setStarting(false);
-    }
+    onStart(chosen, parsed, folder)
+      .catch((err) => setError((err instanceof Error ? err.message : String(err)).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "")))
+      .finally(() => setStarting(false));
   };
+
+  const tab = (value: RunTarget, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTarget(value)}
+      style={{
+        flex: 1,
+        padding: "6px 10px",
+        border: "none",
+        borderRadius: 5,
+        background: target === value ? theme.surface : "transparent",
+        color: target === value ? theme.text : theme.textMuted,
+        fontWeight: target === value ? 600 : 400,
+        boxShadow: target === value ? theme.cardShadow : "none",
+        cursor: "pointer",
+        fontSize: 13,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const labelStyle: CSSProperties = { display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 6 };
 
   return (
     <div
@@ -570,118 +562,112 @@ function NewRunDialog({
       >
         <h2 style={{ margin: 0, marginBottom: 4 }}>Start execution</h2>
         <p style={{ color: theme.textMuted, marginTop: 0, marginBottom: 20, fontSize: 13 }}>
-          Pick a flow and provide the input payload. The run appears in the list immediately.
+          Run a whole flow or a single agent. You'll be taken to the live run as soon as it starts.
         </p>
 
-        <label style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>
-          Flow
-        </label>
-        <select
-          value={flowId}
-          onChange={(e) => setFlowId(e.target.value)}
+        <div
           style={{
-            width: "100%",
-            padding: "8px 10px",
+            display: "flex",
+            gap: 4,
+            padding: 3,
             marginBottom: 16,
+            borderRadius: 8,
             background: theme.codeBg,
-            color: theme.text,
             border: `1px solid ${theme.border}`,
-            borderRadius: 6,
-            fontSize: 14,
           }}
         >
-          {flows.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
-            </option>
-          ))}
-        </select>
-        <div style={{ fontSize: 12, color: theme.textMuted, marginTop: -12, marginBottom: 16 }}>
-          {flow.description}
+          {tab("flow", "Flow")}
+          {tab("agent", "Single agent")}
         </div>
 
-        <label style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>
-          Input (JSON or plain text)
-        </label>
+        {target === "flow" ? (
+          <>
+            <label style={labelStyle}>Flow</label>
+            <select value={flowId} onChange={(e) => setFlowId(e.target.value)} style={fieldStyle}>
+              {catalog.flows.map((option) => (
+                <option key={option.flow.id} value={option.flow.id}>
+                  {option.flow.name} ({option.flow.nodes.length} steps · {option.source})
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>
+              {catalog.loading ? "Loading project flows…" : flow?.description}
+            </div>
+          </>
+        ) : (
+          <>
+            <label style={labelStyle}>Agent</label>
+            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={fieldStyle}>
+              {catalog.agents.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name} ({option.model})
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>
+              {catalog.loading ? "Loading agents…" : agent?.description ?? agent?.role}
+            </div>
+          </>
+        )}
+
+        {problems.length > 0 ? (
+          <div style={{ color: theme.danger, fontSize: 12, marginTop: 8 }}>
+            {problems.map((problem, index) => (
+              <div key={index}>• {problem}</div>
+            ))}
+          </div>
+        ) : null}
+
+        <label style={{ ...labelStyle, marginTop: 16 }}>Input (JSON)</label>
         <textarea
           value={inputText}
           onChange={(e) => {
             setInputText(e.target.value);
             setError(undefined);
           }}
-          rows={10}
+          rows={7}
           style={{
-            width: "100%",
+            ...fieldStyle,
             padding: 10,
-            background: theme.codeBg,
-            color: theme.text,
             border: `1px solid ${error ? theme.danger : theme.border}`,
-            borderRadius: 6,
             fontFamily: theme.fontMono,
             fontSize: 12,
             resize: "vertical",
-            boxSizing: "border-box",
           }}
         />
-        {error && (
-          <div style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{error}</div>
-        )}
+        {error && <div style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{error}</div>}
 
         {canRunForReal() && (
           <>
-            <label style={{ display: "block", fontSize: 12, color: theme.textMuted, margin: "16px 0 6px" }}>
-              Folder agents may read (optional)
-            </label>
+            <label style={{ ...labelStyle, marginTop: 16 }}>Folder agents may read (optional)</label>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <code style={{ flex: 1, fontSize: 12, color: folder ? theme.text : theme.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {folder ?? "None: agents only see the input above"}
               </code>
-              <button type="button" onClick={() => void window.agentlab.runs.pickFolder().then((f) => f && setFolder(f))} style={secondaryButton}>
+              <button type="button" onClick={() => void window.agentlab.runs.pickFolder().then((f) => f && setFolder(f))} style={{ ...buttonStyle("secondary"), color: theme.text }}>
                 Choose…
               </button>
               {folder && (
-                <button type="button" onClick={() => setFolder(undefined)} style={secondaryButton}>
+                <button type="button" onClick={() => setFolder(undefined)} style={{ ...buttonStyle("secondary"), color: theme.text }}>
                   Clear
                 </button>
               )}
             </div>
             <p style={{ fontSize: 12, color: theme.textMuted, marginBottom: 0 }}>
-              Runs for real with Claude. Each step's model calls count against your Claude subscription or API key.
+              Runs for real with Claude. Model calls count against your Claude subscription or API key.
             </p>
           </>
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-          <button
-            type="button"
-            onClick={onCancel}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 6,
-              border: `1px solid ${theme.border}`,
-              background: "transparent",
-              color: theme.text,
-              cursor: "pointer",
-              fontSize: 13,
-            }}
-          >
+          <button type="button" onClick={onCancel} style={{ ...buttonStyle("secondary"), color: theme.text }}>
             Cancel
           </button>
           <button
             type="button"
-            onClick={() => void submit()}
-            disabled={starting}
-            style={{
-              opacity: starting ? 0.6 : 1,
-              padding: "8px 16px",
-              borderRadius: 6,
-              border: `1px solid ${theme.primary}`,
-              background: theme.primary,
-              color: theme.onPrimary,
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-            }}
+            onClick={submit}
+            disabled={!canStart || starting}
+            style={{ ...buttonStyle("primary"), opacity: canStart && !starting ? 1 : 0.5, cursor: canStart && !starting ? "pointer" : "not-allowed" }}
           >
             {starting ? "Starting…" : "▶ Run"}
           </button>
@@ -694,92 +680,28 @@ function NewRunDialog({
 export function RunsView() {
   const store = getTelemetryStore();
   const runs = useRuns();
+  const catalog = useCatalog();
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
   const [newRunOpen, setNewRunOpen] = useState(false);
 
-  // Track pending rerun completions so Stop can cancel them.
-  const rerunTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
-  useEffect(() => {
-    const timers = rerunTimers.current;
-    return () => {
-      for (const t of timers.values()) clearTimeout(t);
-      timers.clear();
-    };
-  }, []);
-
-  const [runError, setRunError] = useState<string | undefined>(undefined);
-
-  const handleRerun = useCallback(
-    (run: Run) => {
-      if (run.flow && canRunForReal()) {
-        // Real runs start again with the same flow snapshot and input.
-        const input = store.listEvents(run.id).find((e) => e.type === "flow_start")?.data as { input?: unknown } | undefined;
-        startRun(run.flow, input?.input).catch((error) => setRunError(errorText(error)));
-        return;
-      }
-      const { running, completed } = buildRerun(run);
-      store.saveRun(running);
-      const timer = setTimeout(() => {
-        rerunTimers.current.delete(running.id);
-        store.saveRun(completed);
-      }, 2000);
-      rerunTimers.current.set(running.id, timer);
-    },
-    [store],
-  );
-
-  const handleStop = useCallback(
-    (run: Run) => {
-      if (run.flow && canRunForReal()) {
-        void cancelRun(run.id); // the engine stops scheduling; running steps are aborted
-        return;
-      }
-      const pending = rerunTimers.current.get(run.id);
-      if (pending) {
-        clearTimeout(pending);
-        rerunTimers.current.delete(run.id);
-      }
-      const now = new Date().toISOString();
-      const stopped: Run = {
-        ...run,
-        status: "failed",
-        completedAt: now,
-        steps: run.steps.map((step) =>
-          step.status === "running" || step.status === "pending"
-            ? {
-                ...step,
-                status: "failed",
-                completedAt: step.completedAt ?? now,
-                error: step.error ?? "Cancelled by user",
-              }
-            : step,
-        ),
-      };
-      store.saveRun(stopped);
-    },
-    [store],
-  );
+  const resolveAgent = useCallback((agentId: string) => catalog.agentsById.get(agentId), [catalog]);
 
   const handleStart = useCallback(
     async (flow: FlowDefinition, input: unknown, folder?: string) => {
-      if (canRunForReal()) {
-        const runId = await startRun(flow, input, folder); // throws into the dialog on failure
-        setNewRunOpen(false);
-        setSelectedRunId(runId);
-        return;
-      }
-      const { running, completed } = buildRunFromFlow(flow, input);
-      store.saveRun(running);
-      const timer = setTimeout(() => {
-        rerunTimers.current.delete(running.id);
-        store.saveRun(completed);
-      }, 2000);
-      rerunTimers.current.set(running.id, timer);
+      const runId = await startRun(flow, input, resolveAgent, folder);
       setNewRunOpen(false);
+      setSelectedRunId(runId);
     },
-    [store],
+    [resolveAgent],
+  );
+
+  const handleRerun = useCallback(
+    (run: Run) => {
+      const input = resolveRunInput(run, store.listEvents(run.id));
+      handleStart(resolveRunFlow(run, catalog), input).catch((err) => console.error("Rerun failed to start:", err));
+    },
+    [store, catalog, handleStart],
   );
 
   useEffect(() => {
@@ -807,7 +729,15 @@ export function RunsView() {
 
   const selectedRun = selectedRunId ? runs.find((run) => run.id === selectedRunId) : undefined;
   if (selectedRun) {
-    return <RunDetail run={selectedRun} onBack={() => setSelectedRunId(undefined)} />;
+    return (
+      <RunDetail
+        key={selectedRun.id}
+        run={selectedRun}
+        catalog={catalog}
+        onBack={() => setSelectedRunId(undefined)}
+        onRerun={handleRerun}
+      />
+    );
   }
 
   return (
@@ -823,23 +753,13 @@ export function RunsView() {
         <div>
           <h1 style={{ margin: 0 }}>Runs</h1>
           <p style={{ color: theme.textMuted, marginTop: 4 }}>
-            Recent flow executions. Click a run to drill into its trace and agents.
+            Recent flow and agent executions. Click a run to follow it live and inspect each agent.
           </p>
         </div>
         <button
           type="button"
           onClick={() => setNewRunOpen(true)}
-          style={{
-            padding: "10px 18px",
-            borderRadius: 8,
-            border: `1px solid ${theme.primary}`,
-            background: theme.primary,
-            color: theme.onPrimary,
-            cursor: "pointer",
-            fontSize: 14,
-            fontWeight: 600,
-            whiteSpace: "nowrap",
-          }}
+          style={{ ...buttonStyle("primary"), padding: "10px 18px", borderRadius: 8, fontSize: 14 }}
         >
           ▶ Start execution
         </button>
@@ -850,108 +770,82 @@ export function RunsView() {
         <p style={{ color: theme.textMuted, marginTop: 24 }}>
           No runs yet. Click <strong>Start execution</strong> to kick one off.
         </p>
-      ) : (  
+      ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
           {[...runs]
             .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
             .map((run) => {
-            const summary = summarizeRun(run, store.listEvents(run.id));
-            return (
-              <div
-                key={run.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedRunId(run.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setSelectedRunId(run.id);
-                  }
-                }}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 110px 90px 110px 100px 90px",
-                  alignItems: "center",
-                  gap: 12,
-                  textAlign: "left",
-                  cursor: "pointer",
-                  background: theme.surface,
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 8,
-                  padding: 12,
-                  color: theme.text,
-                }}
-              >
-                <div>
-                  <strong>{flowOf(run).id === run.flowId ? flowOf(run).name : run.flowId}</strong>
-                  <div style={{ fontSize: 12, color: theme.textMuted }}>
-                    {formatRelative(run.startedAt)} · {run.steps.length} steps
+              const summary = summarizeRun(run, store.listEvents(run.id));
+              return (
+                <div
+                  key={run.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedRunId(run.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedRunId(run.id);
+                    }
+                  }}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 110px 90px 110px 100px 90px",
+                    alignItems: "center",
+                    gap: 12,
+                    textAlign: "left",
+                    cursor: "pointer",
+                    background: theme.surface,
+                    border: `1px solid ${theme.border}`,
+                    borderRadius: 8,
+                    padding: 12,
+                    color: theme.text,
+                  }}
+                >
+                  <div>
+                    <strong>{resolveRunFlow(run, catalog).name}</strong>
+                    <div style={{ fontSize: 12, color: theme.textMuted }}>
+                      {formatRelative(run.startedAt)} · {run.steps.length} {run.steps.length === 1 ? "step" : "steps"}
+                    </div>
                   </div>
+                  <StatusBadge status={summary.status} />
+                  <span style={{ fontSize: 13 }}>{formatMs(summary.durationMs)}</span>
+                  <span style={{ fontSize: 13 }}>
+                    {(summary.inputTokens + summary.outputTokens).toLocaleString()} tok
+                  </span>
+                  <span style={{ fontSize: 13 }}>{formatUsd(summary.estimatedCostUsd)}</span>
+                  {run.status === "running" ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        stopRun(run);
+                      }}
+                      title="Stop this run"
+                      style={{ ...buttonStyle("danger"), padding: "6px 10px", fontSize: 12 }}
+                    >
+                      ◼ Stop
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRerun(run);
+                      }}
+                      title="Rerun with the same input"
+                      style={{ ...buttonStyle("secondary"), padding: "6px 10px", fontSize: 12 }}
+                    >
+                      ↻ Rerun
+                    </button>
+                  )}
                 </div>
-                <StatusBadge status={summary.status} />
-                <span style={{ fontSize: 13 }}>{formatMs(summary.durationMs)}</span>
-                <span style={{ fontSize: 13 }}>
-                  {(summary.inputTokens + summary.outputTokens).toLocaleString()} tok
-                </span>
-                <span style={{ fontSize: 13 }}>{formatUsd(summary.estimatedCostUsd)}</span>
-                {run.status === "running" ? (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleStop(run);
-                    }}
-                    title="Stop this run"
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: `1px solid ${theme.danger}`,
-                      background: theme.codeBg,
-                      color: theme.danger,
-                      cursor: "pointer",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    ◼ Stop
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRerun(run);
-                    }}
-                    title="Rerun this flow"
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: `1px solid ${theme.border}`,
-                      background: theme.codeBg,
-                      color: theme.primary,
-                      cursor: "pointer",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    ↻ Rerun
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {runError && (
-        <div role="alert" style={{ marginTop: 12, color: theme.danger, fontSize: 13 }}>
-          {runError}{" "}
-          <button type="button" onClick={() => setRunError(undefined)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}>
-            ✕
-          </button>
+              );
+            })}
         </div>
       )}
       {newRunOpen && (
-        <NewRunDialog onCancel={() => setNewRunOpen(false)} onStart={handleStart} />
+        <NewRunDialog catalog={catalog} onCancel={() => setNewRunOpen(false)} onStart={handleStart} />
       )}
     </div>
   );

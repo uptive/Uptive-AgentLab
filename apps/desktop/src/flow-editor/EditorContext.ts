@@ -31,6 +31,7 @@ export const DEMO_COLORS = {
   // Theme-invariant green (same in light and dark) so "done" reads as success rather than as the
   // primary accent color, which turns blue in light mode.
   done: theme.statusActive,
+  failed: DANGER,
 } as const;
 
 // Kept for places that just need an error colour.

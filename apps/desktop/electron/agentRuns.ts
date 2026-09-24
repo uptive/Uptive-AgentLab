@@ -87,7 +87,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
 
     const controller = new AbortController();
     let authSource: AuthSource | undefined;
-    const snapshot = { flow, agents: [...agents.values()] };
+    const snapshot = { flow, agents: [...agents.values()], input };
     const sendEvent = (event: TraceEvent) => broadcast(IPC.runEvent, event);
     const runtime = createClaudeAgentRuntime({
       skillsDir: skills.dir,
@@ -116,7 +116,13 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
             broadcast(IPC.runUpdate, { ...run, ...snapshot, ...(authSource ? { authSource } : {}) });
           },
         })
-        .then((run) => broadcast(IPC.runUpdate, { ...run, ...snapshot, authSource: authSource ?? "unknown" }))
+        .then((run) => {
+          // The engine leaves unscheduled steps pending when a run is stopped; show them as cancelled.
+          const steps = controller.signal.aborted
+            ? run.steps.map((step) => (step.status === "pending" ? { ...step, status: "failed" as const, error: "Cancelled by user" } : step))
+            : run.steps;
+          broadcast(IPC.runUpdate, { ...run, steps, ...snapshot, authSource: authSource ?? "unknown" });
+        })
         .catch((error) => (runId ? console.error("[runs] run crashed:", error) : reject(error)))
         .finally(() => runId && active.delete(runId));
     });

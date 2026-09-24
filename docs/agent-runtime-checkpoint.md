@@ -31,6 +31,7 @@ Main's changes that affected this branch, and how they were adapted:
 - **AI agent draft** (`agents:draft`). It now proposes an `effort` and tools from the real tool list (built-in and function tools), not temperature, max tokens or free-text tool names. It uses the Claude Code binary bundled with the Agent SDK when `CLAUDE_BIN` is not set.
 - **Cloud flows** (MongoDB) are listed in the Runs dialog next to flow files.
 - Demo agents use main's `role` + `description` split, with Claude models.
+- **feat/runs** (John's live run graph and single-agent runs) is merged. Its `runLauncher` sends runs to the main process (Claude runtime) in the desktop app and keeps the mock runtime for a plain browser preview. Runs carry both branches' snapshot fields (`flow`, `agents`, `input`, `authSource`). Stop cancels the real run. The dialog lists cloud flows and has the read-only folder option.
 
 ## How to run and test
 
