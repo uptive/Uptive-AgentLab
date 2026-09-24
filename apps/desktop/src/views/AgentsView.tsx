@@ -439,6 +439,50 @@ function SourcePicker({
   );
 }
 
+const inlineCode: CSSProperties = {
+  fontFamily: theme.fontMono,
+  fontSize: 12,
+  padding: "1px 5px",
+  borderRadius: 4,
+  background: theme.surface,
+  border: `1px solid ${theme.border}`,
+};
+
+function LocalAgentsHelp() {
+  return (
+    <div
+      style={{
+        margin: "0 0 14px",
+        padding: "12px 16px",
+        borderRadius: 8,
+        border: `1px solid ${theme.border}`,
+        background: theme.codeBg,
+        fontSize: 13,
+        lineHeight: 1.55,
+        color: theme.textSecondary,
+      }}
+    >
+      <p style={{ margin: "0 0 6px" }}>
+        Local agents are private: they are saved as JSON files on this computer only, the folder is gitignored, and
+        they are never sent to MongoDB. Add one in either of two ways:
+      </p>
+      <ol style={{ margin: 0, paddingLeft: 20 }}>
+        <li>
+          Click <strong>+ New agent</strong> and choose <strong>Local</strong> under <em>Save to</em>.
+        </li>
+        <li>
+          Drop a <code style={inlineCode}>.json</code> file into <code style={inlineCode}>data/local-agents/</code>{" "}
+          (or the folder in <code style={inlineCode}>LOCAL_AGENTS_DIR</code>) and press <strong>Refresh</strong>. It
+          needs <code style={inlineCode}>name</code>, <code style={inlineCode}>role</code>,{" "}
+          <code style={inlineCode}>model</code> and <code style={inlineCode}>systemInstructions</code>; without an{" "}
+          <code style={inlineCode}>id</code>, the file name is used. Invalid files are skipped with a warning in the
+          console.
+        </li>
+      </ol>
+    </div>
+  );
+}
+
 function AgentSection({
   title,
   hint,
@@ -603,6 +647,7 @@ export function AgentsView() {
             hint="JSON files in data/local-agents/, not committed"
             agents={localAgents}
             onOpen={openEdit}
+            notice={<LocalAgentsHelp />}
           />
           <AgentSection
             title="Database"
