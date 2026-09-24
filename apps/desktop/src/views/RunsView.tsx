@@ -3,7 +3,6 @@ import type { AgentDefinition, FlowDefinition, Run, RunStatus, StepRun, TraceEve
 import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
 import { findFlow, validateFlow } from "@agentlab/flow-engine";
 import { theme } from "../theme.js";
-import { demoRuns, demoTraceEvents } from "../demoRuns.js";
 import { useCatalog, type Catalog } from "../runs/catalog.js";
 import { formatMs, formatRelative, formatUsd, stepLatencyMs } from "../runs/format.js";
 import { RunGraph } from "../runs/RunGraph.js";
@@ -769,19 +768,7 @@ export function RunsView() {
     connectLiveRuns();
     let cancelled = false;
     void store.hydrate().then(() => {
-      if (cancelled) return;
-      // Seed missing demo runs idempotently so a store that already has some
-      // runs (from Mongo or a previous session) still gets any new demo ids.
-      const existing = new Set(store.listRuns().map((run) => run.id));
-      const missing = demoRuns.filter((run) => !existing.has(run.id));
-      if (missing.length > 0) {
-        const missingIds = new Set(missing.map((run) => run.id));
-        for (const event of demoTraceEvents) {
-          if (missingIds.has(event.runId)) store.recordEvent(event);
-        }
-        for (const run of missing) store.saveRun(run);
-      }
-      setHydrated(true);
+      if (!cancelled) setHydrated(true);
     });
     return () => {
       cancelled = true;

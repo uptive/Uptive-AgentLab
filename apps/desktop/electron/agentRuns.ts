@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AgentDefinition, AgentStreamChunk, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
 import { demoAgents } from "@agentlab/agent-runtime";
+import type { AsyncTelemetryStore } from "@agentlab/observability";
 import { createClaudeAgentRuntime, createClaudeCodeJsonClient, getClaudeAuthStatus, testMcpServer, type ClaudeAuthStatus } from "@agentlab/agent-runtime/claude";
 import { createMcpServerFileStore, createSkillFileStore, parseSkillFile } from "@agentlab/agent-runtime/library";
 import { createFlowEngine, dummyAgents } from "@agentlab/flow-engine";
@@ -58,6 +59,8 @@ export function claudeBinaryPath(): string | undefined {
 export interface AgentRunsDeps {
   /** A saved agent (local folder or MongoDB); may reject when the database is unreachable. */
   getAgent: (id: string) => Promise<AgentDefinition | undefined>;
+  /** Where runs are saved; the main process persists them itself, whether or not a view is open. */
+  telemetry: AsyncTelemetryStore;
   /** Folder for committed library data (skills/, mcp-servers/). */
   dataDir: string;
 }
@@ -115,6 +118,11 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
     const sendEvent = (event: TraceEvent) => {
       batcher.flush();
       broadcast(IPC.runEvent, event);
+      void deps.telemetry.recordEvent(event).catch((e) => console.warn("[runs] could not save event:", e.message));
+    };
+    const sendRun = (run: Run) => {
+      broadcast(IPC.runUpdate, run);
+      void deps.telemetry.saveRun(run).catch((e) => console.warn("[runs] could not save run:", e.message));
     };
     const runtime = createClaudeAgentRuntime({
       skillsDir: skills.dir,
@@ -141,7 +149,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
               active.set(runId, controller);
               resolve({ runId });
             }
-            broadcast(IPC.runUpdate, { ...run, ...snapshot, ...(authSource ? { authSource } : {}) });
+            sendRun({ ...run, ...snapshot, ...(authSource ? { authSource } : {}) });
           },
         })
         .then((run) => {
@@ -149,7 +157,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
           const steps = controller.signal.aborted
             ? run.steps.map((step) => (step.status === "pending" ? { ...step, status: "failed" as const, error: "Cancelled by user" } : step))
             : run.steps;
-          broadcast(IPC.runUpdate, { ...run, steps, ...snapshot, authSource: authSource ?? "unknown" });
+          sendRun({ ...run, steps, ...snapshot, authSource: authSource ?? "unknown" });
         })
         .catch((error) => (runId ? console.error("[runs] run crashed:", error) : reject(error)))
         .finally(() => runId && active.delete(runId));

@@ -1,6 +1,8 @@
 import type { AgentDefinition, FlowDefinition, TraceEvent } from "@agentlab/contracts";
-import type { TelemetryStore } from "@agentlab/observability";
-import { codeReviewFixture, type EvaluationInput } from "@agentlab/optimization";
+import { demoAgents } from "@agentlab/agent-runtime";
+import { dummyAgents, findFlow } from "@agentlab/flow-engine";
+import { getTelemetryStore, type TelemetryStore } from "@agentlab/observability";
+import type { EvaluationInput } from "@agentlab/optimization";
 
 export interface RunSummary {
   runId: string;
@@ -13,16 +15,6 @@ export interface RunSource {
   listRuns(): Promise<RunSummary[]>;
   loadRun(runId: string): Promise<EvaluationInput | undefined>;
 }
-
-const fixtureRunSource: RunSource = {
-  async listRuns() {
-    const { run, flow } = codeReviewFixture;
-    return [{ runId: run.id, label: `${flow.name} · ${run.id} (fixture)`, completedAt: run.completedAt }];
-  },
-  async loadRun(runId) {
-    return runId === codeReviewFixture.run.id ? codeReviewFixture : undefined;
-  },
-};
 
 /**
  * Adapter for real runs from Group 3's telemetry store. Runs only reference flows/agents by id,
@@ -51,6 +43,42 @@ export function createTelemetryRunSource(deps: {
   };
 }
 
-// Swap point: once Group 3's store has real runs, replace with
-//   createTelemetryRunSource({ store, getFlow, getAgents, getEvents })
-export const runSource: RunSource = fixtureRunSource;
+const builtinAgents = [...demoAgents, ...dummyAgents.filter((a) => !demoAgents.some((d) => d.id === a.id))];
+
+/**
+ * Real runs from this computer's telemetry. Runs carry snapshots of the flow and agents they
+ * executed, so the analysis sees exactly what ran even if the flow was edited since.
+ */
+function createLocalRunSource(): RunSource {
+  const store = getTelemetryStore();
+  const flowOf = (runId: string) => {
+    const run = store.getRun(runId);
+    return run?.flow ?? (run ? findFlow(run.flowId) : undefined);
+  };
+  const source = createTelemetryRunSource({
+    store,
+    getFlow: (flowId) => store.listRuns().find((r) => r.flowId === flowId && r.flow)?.flow ?? findFlow(flowId),
+    getAgents: (ids) => ids.flatMap((id) => builtinAgents.filter((a) => a.id === id)),
+    getEvents: (runId) => store.listEvents(runId),
+  });
+  return {
+    async listRuns() {
+      await store.hydrate();
+      return (await source.listRuns()).map((summary) => ({ ...summary, label: `${flowOf(summary.runId)?.name ?? summary.label} · ${summary.runId.slice(0, 8)}` }));
+    },
+    async loadRun(runId) {
+      await store.hydrate();
+      const run = store.getRun(runId);
+      const flow = flowOf(runId);
+      if (!run || !flow) return undefined;
+      const snapshot = new Map((run.agents ?? []).map((a) => [a.id, a]));
+      const agents = [...new Set(flow.nodes.map((n) => n.agentId))].flatMap((id) => {
+        const agent = snapshot.get(id) ?? builtinAgents.find((a) => a.id === id);
+        return agent ? [agent] : [];
+      });
+      return { run, flow, agents, events: store.listEvents(runId) };
+    },
+  };
+}
+
+export const runSource: RunSource = createLocalRunSource();

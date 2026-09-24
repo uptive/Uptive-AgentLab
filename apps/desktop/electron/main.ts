@@ -16,9 +16,9 @@ import {
   type Run,
   type TraceEvent,
 } from "@agentlab/contracts";
-import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
+import type { PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
-import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
+import { createFileTelemetryStore } from "@agentlab/observability/file";
 import { createMongoAgentStore, createMongoRoleStore, type MongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
 import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
@@ -75,7 +75,6 @@ interface Stores {
   agents: MongoAgentStore;
   flows: FlowStore;
   roles: AgentRoleStore;
-  telemetry: AsyncTelemetryStore;
 }
 
 let stores: Promise<Stores> | undefined;
@@ -92,16 +91,12 @@ async function connect(): Promise<Stores> {
   });
   await client.connect();
   const db = client.db(process.env.MONGODB_DB || "agentlab");
-  const [agents, flows, roles, telemetry] = await Promise.all([
-    createMongoAgentStore(db),
-    createMongoFlowStore(db),
-    createMongoRoleStore(db),
-    createMongoTelemetryStore(db),
-  ]);
+  // Runs are not stored here: telemetry is local to each computer (see the telemetry handlers).
+  const [agents, flows, roles] = await Promise.all([createMongoAgentStore(db), createMongoFlowStore(db), createMongoRoleStore(db)]);
 
   // Flows saved to MongoDB are independent of local flow files (no mirroring): the flows list
   // shows both sources together, and the user picks where each flow lives.
-  return { client, agents, flows, roles, telemetry };
+  return { client, agents, flows, roles };
 }
 
 function getStores(): Promise<Stores> {
@@ -342,7 +337,12 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
 
   // Real flow runs plus the skill and MCP libraries. Library data sits in data/ in development
   // (so it can be committed) and in the app's user data folder when packaged.
+  // Runs and trace events stay on this computer (<userData>/telemetry): they hold agent inputs and
+  // outputs, so they are private by default rather than shared through MongoDB.
+  const telemetry = createFileTelemetryStore(path.join(app.getPath("userData"), "telemetry"));
+
   registerAgentRunIpc({
+    telemetry,
     // Same lookup as the agent IPC: the local folder first, then MongoDB.
     getAgent: async (id) => {
       const [store] = await agentStoreFor(id);
@@ -366,20 +366,17 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   ipcMain.handle(IPC.saveCloudFlow, async (_e, flow: FlowDefinition) => (await getStores()).flows.save(flow));
   ipcMain.handle(IPC.deleteCloudFlow, async (_e, id: string) => (await getStores()).flows.delete(id));
 
-  ipcMain.handle("telemetry:recordEvent", async (_e, event: TraceEvent) => (await getStores()).telemetry.recordEvent(event));
-  ipcMain.handle("telemetry:listEvents", async (_e, runId: string) => (await getStores()).telemetry.listEvents(runId));
-  ipcMain.handle("telemetry:saveRun", async (_e, run: Run) => (await getStores()).telemetry.saveRun(run));
-  ipcMain.handle("telemetry:getRun", async (_e, runId: string) => (await getStores()).telemetry.getRun(runId));
-  ipcMain.handle("telemetry:listRuns", async () => (await getStores()).telemetry.listRuns());
+  ipcMain.handle("telemetry:recordEvent", (_e, event: TraceEvent) => telemetry.recordEvent(event));
+  ipcMain.handle("telemetry:listEvents", (_e, runId: string) => telemetry.listEvents(runId));
+  ipcMain.handle("telemetry:saveRun", (_e, run: Run) => telemetry.saveRun(run));
+  ipcMain.handle("telemetry:getRun", (_e, runId: string) => telemetry.getRun(runId));
+  ipcMain.handle("telemetry:listRuns", () => telemetry.listRuns());
 
   // Renderer RunPersistenceAdapter bridge: load returns a full snapshot the sync
-  // TelemetryStore can hydrate from; save replays runs+events into Mongo.
+  // TelemetryStore can hydrate from; save writes the runs that changed.
   ipcMain.handle("telemetry:load", async (): Promise<PersistedState | null> => {
     try {
-      const { telemetry } = await getStores();
-      const runs = await telemetry.listRuns();
-      const eventArrays = await Promise.all(runs.map((run) => telemetry.listEvents(run.id)));
-      return { version: PERSISTED_STATE_VERSION, runs, events: eventArrays.flat() };
+      return await telemetry.load();
     } catch (err) {
       console.warn("[telemetry] load failed, returning empty state:", (err as Error).message);
       return null;
@@ -393,9 +390,7 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
       throw new Error(`telemetry:save payload exceeds ${MAX_TELEMETRY_BYTES} bytes`);
     }
     try {
-      const { telemetry } = await getStores();
-      await Promise.all(payload.runs.map((run) => telemetry.saveRun(run)));
-      await Promise.all(payload.events.map((event) => telemetry.recordEvent(event)));
+      await telemetry.saveState(payload);
     } catch (err) {
       console.warn("[telemetry] save failed:", (err as Error).message);
     }
