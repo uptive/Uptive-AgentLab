@@ -1,146 +1,672 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
-import type { AgentDefinition } from "@agentlab/contracts";
-import { colors } from "../theme.js";
+import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import type { AgentDefinition, AgentInput, AgentStatus, ToolRef } from "@agentlab/contracts";
+import { ads } from "../theme.js";
 
-// Every JSON file in the repo-level data/agents/ folder is bundled in at build time.
-const agentModules = import.meta.glob<AgentDefinition>("../../../../data/agents/*.json", {
-  eager: true,
-  import: "default",
-});
+const MODELS = ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-fable-5-1"];
 
-const agents: AgentDefinition[] = Object.values(agentModules).sort((a, b) => a.name.localeCompare(b.name));
+interface FormState {
+  name: string;
+  role: string;
+  status: AgentStatus;
+  description: string;
+  model: string;
+  temperature: string;
+  maxTokens: string;
+  systemInstructions: string;
+  tools: ToolRef[];
+  inputSchema: string;
+  outputSchema: string;
+  limitMaxTokens: string;
+  limitMaxCostUsd: string;
+}
 
-export function AgentsView() {
-  const [selectedId, setSelectedId] = useState(agents[0]?.id);
-  const selected = agents.find((agent) => agent.id === selectedId);
+const EMPTY_FORM: FormState = {
+  name: "",
+  role: "",
+  status: "draft",
+  description: "",
+  model: "claude-sonnet-5",
+  temperature: "",
+  maxTokens: "",
+  systemInstructions: "",
+  tools: [],
+  inputSchema: "",
+  outputSchema: "",
+  limitMaxTokens: "",
+  limitMaxCostUsd: "",
+};
 
+const stringifySchema = (schema: unknown) => (schema === undefined ? "" : JSON.stringify(schema, null, 2));
+
+function toForm(agent: AgentDefinition): FormState {
+  return {
+    name: agent.name,
+    role: agent.role,
+    status: agent.status ?? "draft",
+    description: agent.description ?? "",
+    model: agent.model,
+    temperature: agent.modelSettings?.temperature?.toString() ?? "",
+    maxTokens: agent.modelSettings?.maxTokens?.toString() ?? "",
+    systemInstructions: agent.systemInstructions,
+    tools: agent.tools,
+    inputSchema: stringifySchema(agent.inputSchema),
+    outputSchema: stringifySchema(agent.outputSchema),
+    limitMaxTokens: agent.limits?.maxTokens?.toString() ?? "",
+    limitMaxCostUsd: agent.limits?.maxCostUsd?.toString() ?? "",
+  };
+}
+
+const toNumber = (value: string) => (value === "" ? undefined : Number(value));
+
+function parseSchema(label: string, text: string): unknown {
+  if (text.trim() === "") return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${label} is not valid JSON`);
+  }
+}
+
+function toInput(form: FormState, existing?: AgentDefinition): AgentInput {
+  return {
+    name: form.name.trim(),
+    role: form.role.trim(),
+    status: form.status,
+    description: form.description.trim() || undefined,
+    model: form.model.trim(),
+    modelSettings: {
+      ...existing?.modelSettings,
+      temperature: toNumber(form.temperature),
+      maxTokens: toNumber(form.maxTokens),
+    },
+    systemInstructions: form.systemInstructions,
+    tools: form.tools,
+    inputSchema: parseSchema("Input schema", form.inputSchema),
+    outputSchema: parseSchema("Output schema", form.outputSchema),
+    limits: { maxTokens: toNumber(form.limitMaxTokens), maxCostUsd: toNumber(form.limitMaxCostUsd) },
+  };
+}
+
+// Errors thrown in the main process arrive as "Error invoking remote method 'x': Error: <message>".
+function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+}
+
+const STATUS_STYLES: Record<AgentStatus, CSSProperties> = {
+  active: { background: ads.statusActive, color: "#FFFFFF" },
+  draft: { background: ads.statusDraft, color: "#FFFFFF" },
+  disabled: { background: ads.statusDisabledBg, color: ads.statusDisabledText },
+};
+
+const titleStyle: CSSProperties = { fontFamily: ads.fontTitle, fontWeight: 600, color: ads.navy, margin: 0 };
+
+const pillButton: CSSProperties = {
+  padding: "8px 18px",
+  borderRadius: 999,
+  border: "none",
+  background: ads.primary,
+  color: "#FFFFFF",
+  fontFamily: ads.fontBody,
+  fontWeight: 500,
+  fontSize: 14,
+  cursor: "pointer",
+};
+
+const ghostButton: CSSProperties = {
+  ...pillButton,
+  background: "transparent",
+  color: ads.textSecondary,
+  border: `1px solid ${ads.border}`,
+};
+
+const fieldInput: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "9px 12px",
+  borderRadius: 8,
+  border: `1px solid ${ads.border}`,
+  background: ads.surface,
+  color: ads.text,
+  fontFamily: ads.fontBody,
+  fontSize: 14,
+};
+
+const codeInput: CSSProperties = {
+  ...fieldInput,
+  fontFamily: ads.fontMono,
+  fontSize: 13,
+  lineHeight: 1.5,
+  background: ads.pageBg,
+  resize: "vertical",
+};
+
+function StatusBadge({ status = "draft" }: { status?: AgentStatus }) {
   return (
-    <div>
-      <h1>Agents</h1>
-      <p>Create, configure and test reusable agents.</p>
-      {agents.length === 0 ? (
-        <p>No agents yet.</p>
-      ) : (
-        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, width: 220, flexShrink: 0 }}>
-            {agents.map((agent) => (
-              <li key={agent.id}>
-                <button
-                  onClick={() => setSelectedId(agent.id)}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "10px 12px",
-                    marginBottom: 8,
-                    border: `1px solid ${agent.id === selectedId ? colors.accent : colors.bgGrey}`,
-                    borderRadius: 6,
-                    background: colors.bgGrey,
-                    color: colors.secondary,
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{ fontWeight: 600 }}>{agent.name}</div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>{agent.role}</div>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {selected ? <AgentDetails agent={selected} /> : null}
-        </div>
-      )}
-    </div>
+    <span
+      style={{
+        ...STATUS_STYLES[status],
+        padding: "2px 10px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 600,
+        textTransform: "capitalize",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {status}
+    </span>
   );
 }
 
-function AgentDetails({ agent }: { agent: AgentDefinition }) {
+function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
   return (
-    <section style={{ flex: 1, minWidth: 0, padding: 16, borderRadius: 8, background: colors.bgGrey }}>
-      <h2 style={{ margin: 0 }}>{agent.name}</h2>
-      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-        {agent.id} · {agent.role} · <span style={{ color: colors.accent }}>{agent.model}</span>
-      </div>
-      {agent.description ? <p>{agent.description}</p> : null}
-
-      <Field label="System instructions">
-        <pre style={preStyle}>{agent.systemInstructions}</pre>
-      </Field>
-
-      {agent.modelSettings ? (
-        <Field label="Model settings">
-          <KeyValues values={agent.modelSettings} />
-        </Field>
-      ) : null}
-
-      <Field label="Tools">
-        {agent.tools.length === 0 ? (
-          <span style={{ opacity: 0.7 }}>None</span>
-        ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {agent.tools.map((tool) => (
-              <span
-                key={tool.id}
-                title={tool.id}
-                style={{ padding: "4px 10px", borderRadius: 999, background: colors.bgCard, fontSize: 13 }}
-              >
-                {tool.name} <span style={{ color: colors.accent, fontSize: 11 }}>{tool.kind}</span>
-              </span>
-            ))}
-          </div>
-        )}
-      </Field>
-
-      {agent.limits ? (
-        <Field label="Limits">
-          <KeyValues values={agent.limits} />
-        </Field>
-      ) : null}
-
-      {agent.inputSchema !== undefined ? (
-        <Field label="Input schema">
-          <pre style={preStyle}>{JSON.stringify(agent.inputSchema, null, 2)}</pre>
-        </Field>
-      ) : null}
-
-      {agent.outputSchema !== undefined ? (
-        <Field label="Output schema">
-          <pre style={preStyle}>{JSON.stringify(agent.outputSchema, null, 2)}</pre>
-        </Field>
-      ) : null}
-    </section>
+    <div
+      role="alert"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "10px 14px",
+        marginBottom: 16,
+        borderRadius: 8,
+        background: ads.errorBg,
+        color: ads.errorText,
+        fontSize: 14,
+      }}
+    >
+      <span>{message}</span>
+      <button
+        onClick={onDismiss}
+        style={{ ...ghostButton, padding: "4px 12px", color: ads.errorText, borderColor: "rgba(142,25,31,.3)" }}
+      >
+        Dismiss
+      </button>
+    </div>
   );
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div style={{ marginTop: 16 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", opacity: 0.7, marginBottom: 6 }}>
+    <label style={{ display: "block", marginBottom: 18 }}>
+      <span style={{ display: "block", fontSize: 13, fontWeight: 500, color: ads.textSecondary, marginBottom: 6 }}>
         {label}
-      </div>
+      </span>
       {children}
-    </div>
+    </label>
   );
 }
 
-function KeyValues({ values }: { values: object }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 16px", fontSize: 14 }}>
-      {Object.entries(values).map(([key, value]) => (
-        <div key={key} style={{ display: "contents" }}>
-          <span style={{ opacity: 0.7 }}>{key}</span>
-          <span>{String(value)}</span>
-        </div>
-      ))}
+    <section style={{ marginBottom: 22 }}>
+      <h3 style={{ ...titleStyle, fontSize: 14, marginBottom: 10 }}>{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function StatInput({
+  label,
+  unit,
+  ...props
+}: { label: string; unit?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label
+      style={{
+        display: "block",
+        padding: "10px 12px",
+        border: `1px solid ${ads.border}`,
+        borderRadius: 8,
+        background: ads.pageBg,
+      }}
+    >
+      <span style={{ display: "block", fontSize: 12, color: ads.textMuted, marginBottom: 4 }}>{label}</span>
+      <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <input
+          type="number"
+          placeholder="—"
+          {...props}
+          style={{
+            width: "100%",
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            fontFamily: ads.fontTitle,
+            fontWeight: 600,
+            fontSize: 20,
+            color: ads.navy,
+            outline: "none",
+          }}
+        />
+        {unit ? <span style={{ fontSize: 12, color: ads.textMuted }}>{unit}</span> : null}
+      </span>
+    </label>
+  );
+}
+
+const twoColumns: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
+
+function ToolChips({ tools, onChange }: { tools: ToolRef[]; onChange: (tools: ToolRef[]) => void }) {
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<ToolRef["kind"]>("function");
+
+  function add() {
+    const trimmed = name.trim();
+    if (!trimmed || tools.some((tool) => tool.name === trimmed)) return;
+    onChange([...tools, { id: trimmed.toLowerCase().replace(/\s+/g, "-"), name: trimmed, kind }]);
+    setName("");
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: tools.length ? 10 : 0 }}>
+        {tools.map((tool) => (
+          <span
+            key={tool.id}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 6px 4px 12px",
+              borderRadius: 999,
+              border: `1px solid ${ads.border}`,
+              background: ads.pageBg,
+              fontSize: 13,
+              color: ads.text,
+            }}
+          >
+            {tool.name}
+            <span style={{ fontFamily: ads.fontMono, fontSize: 11, color: ads.textMuted }}>{tool.kind}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${tool.name}`}
+              onClick={() => onChange(tools.filter((t) => t.id !== tool.id))}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: ads.textMuted,
+                cursor: "pointer",
+                fontSize: 16,
+                lineHeight: 1,
+                padding: "0 4px",
+              }}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          style={fieldInput}
+          value={name}
+          placeholder="Tool name"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <select
+          style={{ ...fieldInput, width: 130 }}
+          value={kind}
+          onChange={(e) => setKind(e.target.value as ToolRef["kind"])}
+        >
+          <option value="function">function</option>
+          <option value="mcp">mcp</option>
+        </select>
+        <button type="button" style={{ ...ghostButton, flexShrink: 0 }} onClick={add}>
+          Add
+        </button>
+      </div>
     </div>
   );
 }
 
-const preStyle: CSSProperties = {
-  margin: 0,
-  padding: 12,
-  borderRadius: 6,
-  background: colors.bgBlack,
-  whiteSpace: "pre-wrap",
-  overflowX: "auto",
-  fontSize: 13,
-};
+function AgentCard({ agent, onOpen }: { agent: AgentDefinition; onOpen: () => void }) {
+  return (
+    <button
+      onClick={onOpen}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        textAlign: "left",
+        padding: 18,
+        borderRadius: 12,
+        border: `1px solid ${ads.border}`,
+        background: ads.surface,
+        boxShadow: ads.cardShadow,
+        cursor: "pointer",
+        font: "inherit",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, width: "100%" }}>
+        <span style={{ ...titleStyle, fontSize: 16, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {agent.name}
+        </span>
+        <StatusBadge status={agent.status} />
+      </div>
+      <span
+        style={{
+          fontSize: 14,
+          color: ads.textSecondary,
+          lineHeight: 1.45,
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+        }}
+      >
+        {agent.role}
+      </span>
+      <span
+        style={{
+          marginTop: "auto",
+          paddingTop: 12,
+          borderTop: `1px solid ${ads.border}`,
+          width: "100%",
+          fontFamily: ads.fontMono,
+          fontSize: 12,
+          color: ads.primary,
+        }}
+      >
+        {agent.model}
+      </span>
+    </button>
+  );
+}
+
+export function AgentsView() {
+  const [agents, setAgents] = useState<AgentDefinition[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  // undefined = drawer closed, null = creating, agent = editing
+  const [editing, setEditing] = useState<AgentDefinition | null>();
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      setAgents(await window.agentlab.agents.list());
+      setError(undefined);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const drawerOpen = editing !== undefined;
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setEditing(undefined);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+
+  function openCreate() {
+    setError(undefined);
+    setEditing(null);
+    setForm(EMPTY_FORM);
+  }
+
+  function openEdit(agent: AgentDefinition) {
+    setError(undefined);
+    setEditing(agent);
+    setForm(toForm(agent));
+  }
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const input = toInput(form, editing ?? undefined);
+      if (editing) {
+        await window.agentlab.agents.update(editing.id, input);
+      } else {
+        await window.agentlab.agents.create(input);
+      }
+      setEditing(undefined);
+      await refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(agent: AgentDefinition) {
+    try {
+      await window.agentlab.agents.delete(agent.id);
+      if (editing?.id === agent.id) setEditing(undefined);
+      await refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  const set = (key: keyof FormState) => (e: { target: { value: string } }) =>
+    setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
+  const modelOptions = MODELS.includes(form.model) || !form.model ? MODELS : [form.model, ...MODELS];
+
+  return (
+    <div
+      style={{
+        // Fill the shell's content area (which pads 24px) with the light page background.
+        margin: -24,
+        padding: "28px 32px",
+        minHeight: "calc(100% + 48px)",
+        boxSizing: "border-box",
+        background: ads.pageBg,
+        color: ads.text,
+        fontFamily: ads.fontBody,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 }}>
+        <div>
+          <h1 style={{ ...titleStyle, fontSize: 26 }}>Agents</h1>
+          <p style={{ margin: "4px 0 0", color: ads.textSecondary, fontSize: 14 }}>
+            {loading ? "\u00a0" : `${agents.length} ${agents.length === 1 ? "agent" : "agents"}`}
+          </p>
+        </div>
+        <button style={{ ...pillButton, padding: "10px 20px", fontSize: 15 }} onClick={openCreate}>
+          + New agent
+        </button>
+      </div>
+
+      {error && !drawerOpen ? <ErrorBanner message={error} onDismiss={() => setError(undefined)} /> : null}
+
+      {loading ? (
+        <p style={{ color: ads.textMuted }}>Loading agents…</p>
+      ) : agents.length === 0 ? (
+        <p style={{ color: ads.textMuted }}>No agents yet.</p>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 14 }}>
+          {agents.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} onOpen={() => openEdit(agent)} />
+          ))}
+        </div>
+      )}
+
+      {drawerOpen ? (
+        <>
+          <div
+            onClick={() => setEditing(undefined)}
+            style={{ position: "fixed", inset: 0, background: ads.backdrop, zIndex: 10 }}
+          />
+          <form
+            onSubmit={handleSubmit}
+            role="dialog"
+            aria-modal="true"
+            aria-label={editing ? editing.name : "New agent"}
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              height: "100vh",
+              width: 560,
+              maxWidth: "100vw",
+              display: "flex",
+              flexDirection: "column",
+              background: ads.surface,
+              boxShadow: ads.drawerShadow,
+              zIndex: 11,
+            }}
+          >
+            <header
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "20px 24px",
+                borderBottom: `1px solid ${ads.border}`,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <h2 style={{ ...titleStyle, fontSize: 20, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {editing ? editing.name : "New agent"}
+                </h2>
+                {editing ? (
+                  <span style={{ fontFamily: ads.fontMono, fontSize: 12, color: ads.textMuted }}>{editing.id}</span>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setEditing(undefined)}
+                style={{ border: "none", background: "transparent", fontSize: 24, color: ads.textMuted, cursor: "pointer" }}
+              >
+                ×
+              </button>
+            </header>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+              {error ? <ErrorBanner message={error} onDismiss={() => setError(undefined)} /> : null}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 12 }}>
+                <Field label="Name *">
+                  <input style={fieldInput} value={form.name} onChange={set("name")} required />
+                </Field>
+                <Field label="Status">
+                  <select style={fieldInput} value={form.status} onChange={set("status")}>
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                </Field>
+              </div>
+              <Field label="Description">
+                <input style={fieldInput} value={form.description} onChange={set("description")} />
+              </Field>
+              <Field label="Role *">
+                <input
+                  style={fieldInput}
+                  value={form.role}
+                  onChange={set("role")}
+                  placeholder="e.g. Researches sources and summarizes findings"
+                  required
+                />
+              </Field>
+              <Field label="System instructions *">
+                <textarea
+                  style={{ ...codeInput, minHeight: 160 }}
+                  value={form.systemInstructions}
+                  onChange={set("systemInstructions")}
+                  required
+                />
+              </Field>
+              <Field label="Model *">
+                <select style={{ ...fieldInput, fontFamily: ads.fontMono, fontSize: 13 }} value={form.model} onChange={set("model")} required>
+                  {modelOptions.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Section title="Model settings">
+                <div style={twoColumns}>
+                  <StatInput label="Temperature" min={0} max={1} step={0.1} value={form.temperature} onChange={set("temperature")} />
+                  <StatInput label="Max tokens" min={1} step={1} value={form.maxTokens} onChange={set("maxTokens")} />
+                </div>
+              </Section>
+
+              <Section title="Allowed tools">
+                <ToolChips tools={form.tools} onChange={(tools) => setForm((prev) => ({ ...prev, tools }))} />
+              </Section>
+
+              <Section title="Input / output schema">
+                <div style={twoColumns}>
+                  <textarea
+                    aria-label="Input schema"
+                    style={{ ...codeInput, minHeight: 140 }}
+                    value={form.inputSchema}
+                    onChange={set("inputSchema")}
+                    placeholder={'{\n  "type": "object"\n}'}
+                    spellCheck={false}
+                  />
+                  <textarea
+                    aria-label="Output schema"
+                    style={{ ...codeInput, minHeight: 140 }}
+                    value={form.outputSchema}
+                    onChange={set("outputSchema")}
+                    placeholder={'{\n  "type": "object"\n}'}
+                    spellCheck={false}
+                  />
+                </div>
+              </Section>
+
+              <Section title="Limits">
+                <div style={twoColumns}>
+                  <StatInput label="Max tokens per run" min={1} step={1} value={form.limitMaxTokens} onChange={set("limitMaxTokens")} />
+                  <StatInput label="Max cost" unit="USD" min={0} step={0.01} value={form.limitMaxCostUsd} onChange={set("limitMaxCostUsd")} />
+                </div>
+              </Section>
+            </div>
+
+            <footer
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "16px 24px",
+                borderTop: `1px solid ${ads.border}`,
+              }}
+            >
+              {editing ? (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(editing)}
+                  style={{ ...ghostButton, color: ads.errorText, borderColor: ads.errorBg }}
+                >
+                  Delete
+                </button>
+              ) : null}
+              <span style={{ flex: 1 }} />
+              <button type="button" style={ghostButton} onClick={() => setEditing(undefined)}>
+                Cancel
+              </button>
+              <button type="submit" style={{ ...pillButton, opacity: saving ? 0.7 : 1 }} disabled={saving}>
+                {saving ? "Saving…" : editing ? "Save changes" : "Create agent"}
+              </button>
+            </footer>
+          </form>
+        </>
+      ) : null}
+    </div>
+  );
+}

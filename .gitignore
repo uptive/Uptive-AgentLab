@@ -7,3 +7,5 @@ release/
 .env
 .env.local
 .idea/
+*.env
+!.env.example
