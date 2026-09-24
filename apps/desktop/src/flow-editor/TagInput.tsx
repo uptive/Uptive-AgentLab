@@ -1,6 +1,6 @@
 import { useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { normalizeTags } from "@agentlab/flow-engine";
-import { alpha, theme } from "../theme.js";
+import { theme } from "../theme.js";
 import { inputStyle } from "./styles.js";
 
 interface Props {
@@ -58,45 +58,25 @@ export function TagInput({ tags, onChange, disabled }: Props) {
   );
 }
 
-interface TagChipProps {
-  children: ReactNode;
-  active?: boolean;
-  onClick?: () => void;
-  title?: string;
-  size?: "normal" | "small";
+export function TagChip({ children, size = "normal" }: { children: ReactNode; size?: "normal" | "small" }) {
+  return <span style={size === "small" ? { ...chip, ...smallChip } : chip}>{children}</span>;
 }
 
-export function TagChip({ children, active, onClick, title, size = "normal" }: TagChipProps) {
-  const style: CSSProperties = {
-    ...chip,
-    ...(size === "small" ? smallChip : {}),
-    ...(active ? { background: theme.primary, color: theme.onPrimary } : {}),
-    ...(onClick ? { cursor: "pointer" } : {}),
-  };
-  return onClick ? (
-    <button type="button" style={{ ...style, border: "none", font: "inherit", fontSize: style.fontSize, lineHeight: style.lineHeight }} onClick={onClick} title={title}>
-      {children}
-    </button>
-  ) : (
-    <span style={style} title={title}>
-      {children}
-    </span>
-  );
-}
-
+// Same pill as the agent status badges (Draft / Active / Disabled), in the neutral "disabled" colors.
 const chip: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: 4,
-  padding: "1px 8px",
+  padding: "2px 10px",
   borderRadius: 999,
-  background: alpha(theme.primary, 13),
-  color: theme.primary,
-  fontSize: 11,
-  lineHeight: "18px",
+  background: theme.statusDisabledBg,
+  color: theme.statusDisabledText,
+  fontSize: 12,
+  fontWeight: 600,
+  lineHeight: "16px",
   whiteSpace: "nowrap",
 };
 
-const smallChip: CSSProperties = { gap: 3, padding: "0 6px", fontSize: 10, lineHeight: "15px" };
+const smallChip: CSSProperties = { gap: 3, padding: "1px 7px", fontSize: 10, lineHeight: "14px" };
 
 const removeButton: CSSProperties = { background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", fontSize: 13, lineHeight: 1 };
