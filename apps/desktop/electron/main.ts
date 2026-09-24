@@ -1,10 +1,11 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import fs from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MongoClient, ServerApiVersion } from "mongodb";
 import type { AgentInput, AgentStore, Run, TraceEvent } from "@agentlab/contracts";
-import type { TelemetryStore } from "@agentlab/observability";
+import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
+import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
 import { createMongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createAgentFileMirror, createMirroredAgentStore } from "@agentlab/agent-runtime/files";
@@ -15,7 +16,7 @@ const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
 // Minimal KEY=VALUE parser. process.loadEnvFile() crashes Electron 33's main process (SIGTRAP).
 function loadEnvFile(envPath: string) {
-  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+  for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
     const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
     if (!match) continue;
     const [, key, raw] = match;
@@ -26,7 +27,7 @@ function loadEnvFile(envPath: string) {
 
 // Load the first .env found: apps/desktop/.env, then the repo root .env.
 for (const envPath of [path.resolve(__dirname, "../.env"), path.resolve(__dirname, "../../../.env")]) {
-  if (fs.existsSync(envPath)) {
+  if (existsSync(envPath)) {
     loadEnvFile(envPath);
     break;
   }
@@ -35,7 +36,7 @@ for (const envPath of [path.resolve(__dirname, "../.env"), path.resolve(__dirnam
 interface Stores {
   client: MongoClient;
   agents: AgentStore;
-  telemetry: TelemetryStore;
+  telemetry: AsyncTelemetryStore;
 }
 
 let stores: Promise<Stores> | undefined;
@@ -71,6 +72,9 @@ function getStores(): Promise<Stores> {
   return stores;
 }
 
+// Telemetry payload guard for the load/save bridge used by the renderer's RunPersistenceAdapter.
+const MAX_TELEMETRY_BYTES = 25 * 1024 * 1024;
+
 function registerIpc() {
   ipcMain.handle("agents:list", async () => (await getStores()).agents.list());
   ipcMain.handle("agents:get", async (_e, id: string) => (await getStores()).agents.get(id));
@@ -85,6 +89,35 @@ function registerIpc() {
   ipcMain.handle("telemetry:saveRun", async (_e, run: Run) => (await getStores()).telemetry.saveRun(run));
   ipcMain.handle("telemetry:getRun", async (_e, runId: string) => (await getStores()).telemetry.getRun(runId));
   ipcMain.handle("telemetry:listRuns", async () => (await getStores()).telemetry.listRuns());
+
+  // Renderer RunPersistenceAdapter bridge: load returns a full snapshot the sync
+  // TelemetryStore can hydrate from; save replays runs+events into Mongo.
+  ipcMain.handle("telemetry:load", async (): Promise<PersistedState | null> => {
+    try {
+      const { telemetry } = await getStores();
+      const runs = await telemetry.listRuns();
+      const eventArrays = await Promise.all(runs.map((run) => telemetry.listEvents(run.id)));
+      return { version: PERSISTED_STATE_VERSION, runs, events: eventArrays.flat() };
+    } catch (err) {
+      console.warn("[telemetry] load failed, returning empty state:", (err as Error).message);
+      return null;
+    }
+  });
+
+  ipcMain.handle("telemetry:save", async (_e, payload: PersistedState) => {
+    if (!payload || payload.version !== PERSISTED_STATE_VERSION) return;
+    const serialized = JSON.stringify(payload);
+    if (serialized.length > MAX_TELEMETRY_BYTES) {
+      throw new Error(`telemetry:save payload exceeds ${MAX_TELEMETRY_BYTES} bytes`);
+    }
+    try {
+      const { telemetry } = await getStores();
+      await Promise.all(payload.runs.map((run) => telemetry.saveRun(run)));
+      await Promise.all(payload.events.map((event) => telemetry.recordEvent(event)));
+    } catch (err) {
+      console.warn("[telemetry] save failed:", (err as Error).message);
+    }
+  });
 }
 
 function createWindow() {
@@ -93,6 +126,9 @@ function createWindow() {
     height: 800,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
     },
   });
 

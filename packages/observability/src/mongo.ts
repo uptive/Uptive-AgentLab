@@ -1,6 +1,6 @@
 import type { Db } from "mongodb";
 import type { Run, TraceEvent } from "@agentlab/contracts";
-import type { TelemetryStore } from "./index.js";
+import type { AsyncTelemetryStore } from "./index.js";
 
 // Node-only: import this from the Electron main process, never the renderer.
 
@@ -11,7 +11,7 @@ function stripId<T extends { _id: string }>({ _id, ...rest }: T): Omit<T, "_id">
   return rest;
 }
 
-export async function createMongoTelemetryStore(db: Db): Promise<TelemetryStore> {
+export async function createMongoTelemetryStore(db: Db): Promise<AsyncTelemetryStore> {
   const runs = db.collection<RunDoc>("runs");
   const events = db.collection<TraceEventDoc>("traceEvents");
 
