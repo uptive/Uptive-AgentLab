@@ -13,6 +13,7 @@ const agents: AgentLabApi["agents"] = {
   create: (input: AgentInput, source?: AgentSource) => ipcRenderer.invoke("agents:create", input, source),
   update: (id: string, patch: Partial<AgentInput>) => ipcRenderer.invoke("agents:update", id, patch),
   delete: (id: string) => ipcRenderer.invoke("agents:delete", id),
+  promote: (id: string) => ipcRenderer.invoke("agents:promote", id),
   draft: (request: AgentDraftRequest) => ipcRenderer.invoke("agents:draft", request),
 };
 

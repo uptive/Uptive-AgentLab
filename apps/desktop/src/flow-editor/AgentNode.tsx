@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { alpha, theme } from "../theme.js";
 import type { AgentFlowNode } from "./graphMapping.js";
+import { AgentSourceTag } from "./AgentSourceTag.js";
 import { DANGER, DEMO_COLORS, useEditorContext } from "./EditorContext.js";
 import type { DemoNodeFrame } from "./useDemoRun.js";
 
@@ -8,7 +9,7 @@ import type { DemoNodeFrame } from "./useDemoRun.js";
 const handleStyle = { width: 12, height: 12, background: theme.primary, border: `2px solid ${theme.canvasBg}` };
 
 export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
-  const { agentsById, incoming, invalidNodeIds, demo } = useEditorContext();
+  const { agentsById, cloud, incoming, invalidNodeIds, demo } = useEditorContext();
   const agent = agentsById.get(data.agentId);
   const waitsFor = incoming[id] ?? 0;
   const demoNode = demo?.nodes[id];
@@ -48,7 +49,7 @@ export function AgentNode({ id, data, selected }: NodeProps<AgentFlowNode>) {
         <strong style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {data.label || agent?.name || data.agentId}
         </strong>
-        {demoNode ? <DemoBadge frame={demoNode} /> : null}
+        {demoNode ? <DemoBadge frame={demoNode} /> : agent ? <AgentSourceTag source={agent.source} warn={cloud && agent.source === "local"} /> : null}
       </div>
       <div style={{ opacity: 0.7, marginTop: 2 }}>
         {agent ? `${agent.role} · ${agent.model}` : <span style={{ color: DANGER }}>Unknown agent "{data.agentId}"</span>}

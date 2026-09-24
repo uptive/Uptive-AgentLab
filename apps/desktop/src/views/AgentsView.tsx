@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import type { AgentDefinition, AgentInput, AgentStatus, ToolRef } from "@agentlab/contracts";
 import type { AgentDraft, AgentSource, SourcedAgent } from "../../electron/api.js";
-import { theme } from "../theme.js";
+import { PROMOTION_SUMMARY, promotionConfirmText } from "../agentPromotion.js";
+import { alpha, theme } from "../theme.js";
 
 const MODELS = ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-fable-5-1"];
 
@@ -596,6 +597,55 @@ const inlineCode: CSSProperties = {
   border: `1px solid ${theme.border}`,
 };
 
+function PromotePanel({
+  blockedReason,
+  promoting,
+  onPromote,
+}: {
+  /** Why promoting is unavailable right now, if it is. */
+  blockedReason?: string;
+  promoting: boolean;
+  onPromote: () => void;
+}) {
+  const disabled = promoting || !!blockedReason;
+  return (
+    <div
+      style={{
+        marginBottom: 20,
+        padding: "12px 14px",
+        borderRadius: 8,
+        border: `1px solid ${theme.warning}`,
+        background: alpha(theme.warning, 10),
+        fontSize: 13,
+        lineHeight: 1.5,
+        color: theme.textSecondary,
+      }}
+    >
+      <strong style={{ display: "block", color: theme.text, marginBottom: 4 }}>Share with the team</strong>
+      <p style={{ margin: "0 0 10px" }}>
+        {PROMOTION_SUMMARY} <strong style={{ color: theme.text }}>The local file is removed when you promote.</strong>
+      </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button
+          type="button"
+          onClick={onPromote}
+          disabled={disabled}
+          style={{
+            ...ghostButton,
+            color: theme.text,
+            borderColor: theme.warning,
+            opacity: disabled ? 0.55 : 1,
+            cursor: disabled ? "not-allowed" : "pointer",
+          }}
+        >
+          {promoting ? "Promoting…" : "Promote to database"}
+        </button>
+        {blockedReason ? <span style={{ fontSize: 12, color: theme.textMuted }}>{blockedReason}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function LocalAgentsHelp() {
   return (
     <div
@@ -676,6 +726,7 @@ export function AgentsView() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saveTo, setSaveTo] = useState<AgentSource>("database");
   const [saving, setSaving] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   const [roles, setRoles] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
   const [draft, setDraft] = useState<AgentDraft>();
@@ -772,11 +823,35 @@ export function AgentsView() {
     }
   }
 
+  async function handlePromote(agent: SourcedAgent) {
+    if (!window.confirm(promotionConfirmText(agent))) return;
+    setPromoting(true);
+    setError(undefined);
+    try {
+      const promoted = await window.agentlab.agents.promote(agent.id);
+      // Keep the drawer open on the promoted copy so it's clear where the agent went.
+      setEditing(promoted);
+      setForm(toForm(promoted));
+      await refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setPromoting(false);
+    }
+  }
+
   const set = (key: keyof FormState) => (e: { target: { value: string } }) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
   const localAgents = agents.filter((agent) => agent.source === "local");
   const databaseAgents = agents.filter((agent) => agent.source === "database");
+
+  const hasUnsavedChanges = !!editing && JSON.stringify(form) !== JSON.stringify(toForm(editing));
+  const promoteBlockedReason = databaseError
+    ? "MongoDB is unreachable."
+    : hasUnsavedChanges
+      ? "Save or discard your changes first."
+      : undefined;
 
   const modelOptions = MODELS.includes(form.model) || !form.model ? MODELS : [form.model, ...MODELS];
 
@@ -896,6 +971,14 @@ export function AgentsView() {
 
             <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
               {error ? <ErrorBanner message={error} onDismiss={() => setError(undefined)} /> : null}
+
+              {editing?.source === "local" ? (
+                <PromotePanel
+                  blockedReason={promoteBlockedReason}
+                  promoting={promoting}
+                  onPromote={() => void handlePromote(editing)}
+                />
+              ) : null}
 
               {editing === null ? (
                 draft ? (

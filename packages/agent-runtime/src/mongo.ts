@@ -10,7 +10,12 @@ function stripId({ _id, ...rest }: AgentDoc): AgentDefinition {
   return rest;
 }
 
-export async function createMongoAgentStore(db: Db): Promise<AgentStore> {
+export interface MongoAgentStore extends AgentStore {
+  /** Stores an existing agent under its own id (e.g. one promoted from the local folder). Throws if the id is taken. */
+  insert(agent: AgentDefinition): Promise<AgentDefinition>;
+}
+
+export async function createMongoAgentStore(db: Db): Promise<MongoAgentStore> {
   const agents = db.collection<AgentDoc>("agents");
   await agents.createIndex({ name: 1 });
 
@@ -29,6 +34,16 @@ export async function createMongoAgentStore(db: Db): Promise<AgentStore> {
       const id = crypto.randomUUID();
       const agent: AgentDefinition = { ...input, tools: input.tools ?? [], id, createdAt: now, updatedAt: now };
       await agents.insertOne({ _id: id, ...agent });
+      return agent;
+    },
+    async insert(existing) {
+      validateAgentInput(existing);
+      if (await agents.findOne({ _id: existing.id }, { projection: { _id: 1 } })) {
+        throw new Error(`An agent with id "${existing.id}" already exists in the database`);
+      }
+      const now = new Date().toISOString();
+      const agent: AgentDefinition = { ...existing, tools: existing.tools ?? [], createdAt: existing.createdAt ?? now, updatedAt: now };
+      await agents.insertOne({ _id: agent.id, ...agent });
       return agent;
     },
     async update(id, patch) {

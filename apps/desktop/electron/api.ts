@@ -48,6 +48,11 @@ export interface AgentsApi {
   /** Updates and deletes go to whichever store holds the agent. */
   update(id: string, patch: Partial<AgentInput>): Promise<SourcedAgent>;
   delete(id: string): Promise<boolean>;
+  /**
+   * Moves a local agent to MongoDB under the same id, so flows that use it keep working, and
+   * deletes its file from the local folder. Nothing changes if either step fails.
+   */
+  promote(id: string): Promise<SourcedAgent>;
 }
 
 export interface AgentDraftRequest {

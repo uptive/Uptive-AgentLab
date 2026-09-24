@@ -1,10 +1,12 @@
 import { createContext, useContext } from "react";
-import type { AgentDefinition } from "@agentlab/contracts";
+import type { SourcedAgent } from "../../electron/api.js";
 import { theme } from "../theme.js";
 import type { DemoFrame } from "./useDemoRun.js";
 
 export interface EditorContextValue {
-  agentsById: Map<string, AgentDefinition>;
+  agentsById: Map<string, SourcedAgent>;
+  /** True when the flow is stored in MongoDB, where local agents only resolve on this computer. */
+  cloud: boolean;
   /** Number of upstream dependencies per node id. */
   incoming: Record<string, number>;
   /** Node ids that have validation errors. */
@@ -15,6 +17,7 @@ export interface EditorContextValue {
 
 export const EditorContext = createContext<EditorContextValue>({
   agentsById: new Map(),
+  cloud: false,
   incoming: {},
   invalidNodeIds: new Set(),
 });

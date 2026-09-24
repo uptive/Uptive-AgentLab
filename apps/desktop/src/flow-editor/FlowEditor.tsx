@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   addEdge,
   Background,
@@ -15,8 +15,10 @@ import {
   type IsValidConnection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { AgentDefinition, FlowDefinition } from "@agentlab/contracts";
+import type { FlowDefinition } from "@agentlab/contracts";
 import { serializeFlow, topologicalLevels, validateFlow, wouldCreateCycle } from "@agentlab/flow-engine";
+import type { SourcedAgent } from "../../electron/api.js";
+import { promotionConfirmText } from "../agentPromotion.js";
 import { alpha, theme, useThemeMode } from "../theme.js";
 import { AgentNode } from "./AgentNode.js";
 import { AgentPalette, AGENT_DRAG_MIME } from "./AgentPalette.js";
@@ -51,9 +53,9 @@ interface Props {
 }
 
 export function FlowEditor(props: Props) {
-  // Agents are loaded from MongoDB (via the main process) once per editor session, same
-  // data AgentsView edits — so a step always reflects the agent's real name/role/model.
-  const [agents, setAgents] = useState<AgentDefinition[]>();
+  // Agents are loaded once per editor session from both stores AgentsView edits: MongoDB and the
+  // local folder. Each carries its source, so the editor can flag local agents in cloud flows.
+  const [agents, setAgents] = useState<SourcedAgent[]>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
@@ -67,6 +69,9 @@ export function FlowEditor(props: Props) {
     };
   }, []);
 
+  // Refreshes the list in place after a promotion; the editor (and unsaved edits) stays mounted.
+  const reloadAgents = useCallback(async () => setAgents(await bridge().agents.list()), []);
+
   if (error) {
     return <div style={{ padding: 24, color: DANGER }}>Could not load agents: {error}</div>;
   }
@@ -76,12 +81,19 @@ export function FlowEditor(props: Props) {
 
   return (
     <ReactFlowProvider>
-      <FlowEditorInner {...props} agents={agents} />
+      <FlowEditorInner {...props} agents={agents} reloadAgents={reloadAgents} />
     </ReactFlowProvider>
   );
 }
 
-function FlowEditorInner({ source, initialFlow, onClose, agents }: Props & { agents: AgentDefinition[] }) {
+function FlowEditorInner({
+  source,
+  initialFlow,
+  onClose,
+  agents,
+  reloadAgents,
+}: Props & { agents: SourcedAgent[]; reloadAgents: () => Promise<void> }) {
+  const cloud = source.kind === "cloud";
   const agentsById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const knownAgentIds = useMemo(() => agents.map((a) => a.id), [agents]);
   const initial = useMemo(() => flowToGraph(initialFlow), [initialFlow]);
@@ -110,13 +122,21 @@ function FlowEditorInner({ source, initialFlow, onClose, agents }: Props & { age
   }, [flow]);
   const selectedNode = nodes.find((n) => n.selected);
   const dirty = json !== savedJson;
+  // Local agents referenced by a cloud flow resolve only on this computer.
+  const localAgentsInCloud = useMemo(() => {
+    if (!cloud) return [];
+    const ids = new Set(flow.nodes.map((n) => n.agentId));
+    return agents.filter((a) => a.source === "local" && ids.has(a.id));
+  }, [cloud, flow, agents]);
+  // The set of local agents the user last agreed to save, so the warning isn't repeated on every save.
+  const acknowledgedLocal = useRef("");
 
   const ctx = useMemo<EditorContextValue>(() => {
     const incoming: Record<string, number> = {};
     for (const e of edges) incoming[e.target] = (incoming[e.target] ?? 0) + 1;
     const invalidNodeIds = new Set(validation.errors.flatMap((e) => (e.nodeId ? [e.nodeId] : [])));
-    return { agentsById, incoming, invalidNodeIds, demo: demo.frame };
-  }, [agentsById, edges, validation, demo.frame]);
+    return { agentsById, cloud, incoming, invalidNodeIds, demo: demo.frame };
+  }, [agentsById, cloud, edges, validation, demo.frame]);
 
   // Any structural edit invalidates a finished demo run's picture.
   const stopDemo = demo.stop;
@@ -190,9 +210,29 @@ function FlowEditorInner({ source, initialFlow, onClose, agents }: Props & { age
     requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }));
   };
 
+  const promoteAgent = async (agent: SourcedAgent) => {
+    if (!window.confirm(promotionConfirmText(agent))) return;
+    try {
+      await bridge().agents.promote(agent.id);
+      await reloadAgents();
+      setNotice({ kind: "info", text: `"${agent.name}" is now a database agent. Its local file was removed.` });
+    } catch (err) {
+      setNotice({ kind: "error", text: `Could not promote "${agent.name}": ${errorMessage(err)}` });
+    }
+  };
+
   // ---- Save / close --------------------------------------------------------
   const save = useCallback(async () => {
     if (saving) return;
+    const localKey = localAgentsInCloud.map((a) => a.id).join(",");
+    if (localKey && localKey !== acknowledgedLocal.current) {
+      const names = localAgentsInCloud.map((a) => `• ${a.name}`).join("\n");
+      const message =
+        `This cloud flow uses local agents that exist only on this computer:\n${names}\n\n` +
+        "Teammates who open it will see these steps as unknown agents and can't run the demo. Save anyway?";
+      if (!window.confirm(message)) return;
+      acknowledgedLocal.current = localKey;
+    }
     setSaving(true);
     try {
       if (source.kind === "local") await bridge().flows.write(source.filePath, json);
@@ -204,7 +244,7 @@ function FlowEditorInner({ source, initialFlow, onClose, agents }: Props & { age
     } finally {
       setSaving(false);
     }
-  }, [source, json, flow, saving, validation.valid]);
+  }, [source, json, flow, saving, validation.valid, localAgentsInCloud]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -280,7 +320,7 @@ function FlowEditorInner({ source, initialFlow, onClose, agents }: Props & { age
         ) : null}
 
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          <AgentPalette agents={agents} disabled={playing} onAdd={(id) => addAgentNode(id)} />
+          <AgentPalette agents={agents} cloud={cloud} disabled={playing} onAdd={(id) => addAgentNode(id)} />
           <div style={{ flex: 1, position: "relative" }} onDragOver={onDragOver} onDrop={onDrop}>
             <ReactFlow<AgentFlowNode, Edge>
               nodes={nodes}
@@ -332,6 +372,7 @@ function FlowEditorInner({ source, initialFlow, onClose, agents }: Props & { age
             selectedNode={selectedNode}
             agents={agents}
             agentsById={agentsById}
+            cloud={cloud}
             errors={validation.errors}
             levels={levels}
             json={json}
@@ -339,6 +380,7 @@ function FlowEditorInner({ source, initialFlow, onClose, agents }: Props & { age
             onUpdateNode={updateNode}
             onDeleteNode={deleteNode}
             onRemoveEdge={removeEdge}
+            onPromoteAgent={promoteAgent}
           />
         </div>
       </div>

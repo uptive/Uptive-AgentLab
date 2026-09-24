@@ -18,7 +18,7 @@ import {
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createMongoTelemetryStore } from "@agentlab/observability/mongo";
-import { createMongoAgentStore, createMongoRoleStore } from "@agentlab/agent-runtime/mongo";
+import { createMongoAgentStore, createMongoRoleStore, type MongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
 import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
 import type { JsonRequest } from "@agentlab/optimization";
@@ -53,7 +53,7 @@ for (const envPath of [path.resolve(__dirname, "../.env"), path.resolve(__dirnam
 
 interface Stores {
   client: MongoClient;
-  agents: AgentStore;
+  agents: MongoAgentStore;
   flows: FlowStore;
   roles: AgentRoleStore;
   telemetry: AsyncTelemetryStore;
@@ -252,6 +252,22 @@ function registerIpc(store: EditorConfigStore) {
   ipcMain.handle("agents:delete", async (_e, id: string) => {
     const [store] = await agentStoreFor(id);
     return store.delete(id);
+  });
+  ipcMain.handle("agents:promote", async (_e, id: string) => {
+    await localAgentsLoaded;
+    const agent = await localAgents.get(id);
+    if (!agent) throw new Error(`Local agent ${id} not found`);
+    const database = (await getStores()).agents;
+    const promoted = await database.insert(agent);
+    try {
+      if (!(await localAgents.delete(id))) throw new Error("it is no longer in the local folder");
+    } catch (error) {
+      // Undo the insert so the agent never ends up in both stores.
+      await database.delete(id);
+      throw new Error(`Could not remove the local file, so the agent was not promoted: ${(error as Error).message}`);
+    }
+    await rememberRole(promoted.role);
+    return tag("database")(promoted);
   });
   // Roles are read here rather than passed from the renderer, so the draft always sees the current list.
   ipcMain.handle("agents:draft", async (_e, request: AgentDraftRequest) => generateAgentDraft(request, await listRoles()));

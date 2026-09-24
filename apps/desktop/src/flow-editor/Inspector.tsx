@@ -1,8 +1,11 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
-import type { AgentDefinition, FlowDefinition } from "@agentlab/contracts";
+import type { FlowDefinition } from "@agentlab/contracts";
 import type { FlowIssue } from "@agentlab/flow-engine";
-import { theme } from "../theme.js";
-import { DANGER } from "./EditorContext.js";
+import type { SourcedAgent } from "../../electron/api.js";
+import { PROMOTION_SUMMARY } from "../agentPromotion.js";
+import { alpha, theme } from "../theme.js";
+import { LOCAL_IN_CLOUD_HINT } from "./AgentSourceTag.js";
+import { DANGER, WARNING } from "./EditorContext.js";
 import type { AgentFlowNode, AgentNodeData, FlowMeta } from "./graphMapping.js";
 import { buttonBase, inputStyle, preStyle } from "./styles.js";
 import { TagInput } from "./TagInput.js";
@@ -12,8 +15,10 @@ interface Props {
   meta: FlowMeta;
   onMetaChange: (meta: FlowMeta) => void;
   selectedNode?: AgentFlowNode;
-  agents: AgentDefinition[];
-  agentsById: Map<string, AgentDefinition>;
+  agents: SourcedAgent[];
+  agentsById: Map<string, SourcedAgent>;
+  /** True when the flow is stored in MongoDB. */
+  cloud: boolean;
   errors: FlowIssue[];
   levels?: string[][];
   json: string;
@@ -21,6 +26,8 @@ interface Props {
   onUpdateNode: (id: string, patch: Partial<AgentNodeData>) => void;
   onDeleteNode: (id: string) => void;
   onRemoveEdge: (source: string, target: string) => void;
+  /** Moves a local agent to MongoDB (after confirming) and reloads the agent list. */
+  onPromoteAgent: (agent: SourcedAgent) => Promise<void>;
 }
 
 export function Inspector(props: Props) {
@@ -102,7 +109,7 @@ function FlowPanel({ flow, meta, onMetaChange, errors, levels, json, locked, age
   );
 }
 
-function NodePanel({ node, flow, agents, agentsById, locked, onUpdateNode, onDeleteNode, onRemoveEdge }: Props & { node: AgentFlowNode }) {
+function NodePanel({ node, flow, agents, agentsById, cloud, locked, onUpdateNode, onDeleteNode, onRemoveEdge, onPromoteAgent }: Props & { node: AgentFlowNode }) {
   const agent = agentsById.get(node.data.agentId);
   const dependsOn = flow.nodes.find((n) => n.id === node.id)?.dependsOn ?? [];
   const dependents = flow.nodes.filter((n) => n.dependsOn.includes(node.id)).map((n) => n.id);
@@ -138,8 +145,10 @@ function NodePanel({ node, flow, agents, agentsById, locked, onUpdateNode, onDel
             <div style={{ marginTop: 4 }}>
               Model: <code>{agent.model}</code>
             </div>
+            <div style={{ marginTop: 4 }}>Stored: {agent.source === "local" ? "on this computer (local)" : "in the database"}</div>
           </div>
         ) : null}
+        {agent?.source === "local" ? <PromoteBox cloud={cloud} locked={locked} onPromote={() => onPromoteAgent(agent)} /> : null}
       </Section>
 
       <Section title={`Waits for (${dependsOn.length})`}>
@@ -182,6 +191,43 @@ function NodePanel({ node, flow, agents, agentsById, locked, onUpdateNode, onDel
         </button>
       ) : null}
     </>
+  );
+}
+
+function PromoteBox({ cloud, locked, onPromote }: { cloud: boolean; locked: boolean; onPromote: () => Promise<void> }) {
+  const [promoting, setPromoting] = useState(false);
+  const promote = async () => {
+    setPromoting(true);
+    try {
+      await onPromote();
+    } finally {
+      setPromoting(false);
+    }
+  };
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: "8px 10px",
+        borderRadius: 6,
+        border: `1px solid ${WARNING}`,
+        background: alpha(WARNING, 10),
+        fontSize: 12,
+        lineHeight: 1.45,
+      }}
+    >
+      {cloud ? <p style={{ margin: "0 0 6px", color: "inherit" }}>{LOCAL_IN_CLOUD_HINT}</p> : null}
+      <p style={{ margin: "0 0 8px", color: "inherit", opacity: 0.85 }}>
+        {PROMOTION_SUMMARY} <strong>The local file is removed.</strong>
+      </p>
+      <button
+        style={{ ...buttonBase, borderColor: WARNING, opacity: locked || promoting ? 0.55 : 1 }}
+        disabled={locked || promoting}
+        onClick={() => void promote()}
+      >
+        {promoting ? "Promoting…" : "Promote to database"}
+      </button>
+    </div>
   );
 }
 
