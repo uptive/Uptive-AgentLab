@@ -109,6 +109,166 @@
   cursor: default;
 }
 
+/* Analyze split button */
+.opt-split {
+  position: relative;
+  display: inline-flex;
+}
+
+.opt-split-main {
+  border-radius: 10px 0 0 10px;
+}
+
+.opt-split-toggle {
+  display: grid;
+  place-items: center;
+  padding: 10px 11px;
+  border-radius: 0 10px 10px 0;
+  border-left: 1px solid color-mix(in srgb, var(--on-mint) 25%, transparent);
+}
+
+.opt-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  min-width: 280px;
+  padding: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.opt-menu-label {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.opt-menu-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.opt-menu-item:hover,
+.opt-menu-item:focus-visible {
+  background: var(--hover);
+}
+
+.opt-menu-item .name,
+.opt-radio .name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.opt-menu-item .note,
+.opt-radio .note {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.opt-menu .badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--hover);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.opt-icon-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.opt-icon-button:hover {
+  color: var(--paper);
+}
+
+/* Settings dialog */
+.opt-dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--paper);
+  box-shadow: var(--shadow-drawer);
+}
+
+.opt-dialog::backdrop {
+  background: var(--color-backdrop);
+}
+
+.opt-dialog form {
+  padding: 24px 24px 20px;
+}
+
+.opt-dialog h2 {
+  margin: 0 0 18px;
+  font-size: 18px;
+}
+
+.opt-dialog fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.opt-dialog legend {
+  padding: 0;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.opt-dialog .hint {
+  margin: 4px 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.opt-radio {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 12px;
+  align-items: start;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.opt-radio:has(input:checked) {
+  border-color: var(--mint);
+}
+
+.opt-radio input {
+  margin: 3px 0 0;
+  accent-color: var(--mint);
+}
+
+.opt-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
 .opt-empty {
   margin: 72px 0;
   color: var(--muted);
@@ -626,6 +786,219 @@
   color: var(--mint);
 }
 
+/* Analysis in progress */
+.opt-progress {
+  margin-top: 40px;
+  padding: 28px 28px 24px;
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.opt-progress-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.opt-progress-title {
+  margin: 6px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.opt-progress-clock {
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--mint);
+}
+
+.opt-progress-bar {
+  height: 4px;
+  margin: 22px 0 26px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--hairline);
+}
+
+.opt-progress-bar .fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--mint), color-mix(in srgb, var(--mint) 45%, var(--paper)), var(--mint));
+  background-size: 200% 100%;
+  animation: opt-shimmer 1.6s linear infinite;
+  transition: width 400ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* The run's steps, with a scan line sweeping across; each bar lights up as the line reaches it. */
+.opt-scan {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding: 4px 0 8px;
+  --scan-label: 140px;
+}
+
+.opt-scan-row {
+  display: grid;
+  grid-template-columns: var(--scan-label) 1fr;
+  align-items: center;
+  gap: 16px;
+}
+
+.opt-scan-name {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.opt-scan-track {
+  position: relative;
+  height: 10px;
+}
+
+.opt-scan-bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--bar);
+  animation: opt-glow 2.8s linear infinite;
+}
+
+.opt-scan-line {
+  position: absolute;
+  top: -4px;
+  bottom: 0;
+  left: calc(var(--scan-label) + 16px);
+  width: calc(100% - var(--scan-label) - 16px);
+  pointer-events: none;
+}
+
+.opt-scan-line::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--mint);
+  box-shadow:
+    0 0 12px var(--mint),
+    -24px 0 32px color-mix(in srgb, var(--mint) 25%, transparent);
+  animation: opt-sweep 2.8s linear infinite;
+}
+
+.opt-checklist {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.opt-checklist li {
+  display: grid;
+  grid-template-columns: 22px minmax(120px, 180px) 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.opt-checklist .name {
+  font-weight: 500;
+}
+
+.opt-checklist .detail {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.opt-status-icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.is-running .opt-status-icon {
+  border: 2px solid var(--hairline);
+  border-top-color: var(--mint);
+  animation: opt-spin 0.8s linear infinite;
+}
+
+.is-done .opt-status-icon {
+  background: var(--mint);
+  color: var(--on-mint);
+  animation: opt-pop 260ms ease-out;
+}
+
+.is-fallback .opt-status-icon {
+  background: var(--medium);
+  color: var(--page);
+}
+
+.is-skipped .opt-status-icon {
+  background: var(--high);
+  color: var(--page);
+}
+
+.is-done .detail {
+  color: var(--paper);
+}
+
+@keyframes opt-sweep {
+  from {
+    left: 0%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+@keyframes opt-glow {
+  0% {
+    background: var(--mint);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--mint) 70%, transparent);
+  }
+  22%,
+  100% {
+    background: var(--bar);
+    box-shadow: none;
+  }
+}
+
+@keyframes opt-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@keyframes opt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes opt-pop {
+  from {
+    transform: scale(0.4);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 @container (max-width: 720px) {
   .opt-timeline {
     grid-template-columns: 120px 1fr;
@@ -647,11 +1020,34 @@
   .opt-detail-meta {
     grid-column: 1;
   }
+  .opt-scan {
+    --scan-label: 96px;
+  }
+  .opt-checklist li {
+    grid-template-columns: 22px 1fr;
+  }
+  .opt-checklist .detail {
+    grid-column: 2;
+    text-align: left;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .opt-tl-bar,
-  .opt-chevron {
+  .opt-chevron,
+  .opt-progress-bar .fill {
     transition: none;
+  }
+  .opt-scan-bar,
+  .opt-progress-bar .fill,
+  .is-done .opt-status-icon {
+    animation: none;
+  }
+  .opt-scan-line {
+    display: none;
+  }
+  /* Keep a slow spinner so "still working" stays visible. */
+  .is-running .opt-status-icon {
+    animation-duration: 2.4s;
   }
 }

@@ -23,7 +23,7 @@ import { createMongoAgentStore, createMongoRoleStore } from "@agentlab/agent-run
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
 import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
 import type { JsonRequest } from "@agentlab/optimization";
-import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
+import { createModelClient } from "@agentlab/optimization/models";
 import { generateAgentDraft } from "./agentDraft.js";
 import { createClaudeCliRuntime } from "@agentlab/agent-runtime/claude-cli";
 import {
@@ -322,8 +322,10 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
     listMcpSources({ appDataDir: app.getPath("appData"), repoRoot: path.resolve(__dirname, "../../..") }),
   );
 
-  // Model calls for LLM-backed evaluators run here so API credentials never reach the renderer.
-  const modelClient = createAnthropicModelClient();
+  // Model calls for LLM-backed evaluators run here. AGENT_BACKEND=cli (default) uses the local
+  // Claude Code CLI and your Claude.ai subscription; AGENT_BACKEND=api uses the Anthropic API.
+  const modelClient = createModelClient();
+  console.log(`[optimize] model backend: ${process.env.AGENT_BACKEND ?? "cli"}`);
   ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
 
   ipcMain.handle(IPC.listCloudFlows, async () => (await getStores()).flows.list());

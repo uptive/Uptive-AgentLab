@@ -9,13 +9,24 @@ import type {
   StepTiming,
 } from "@agentlab/contracts";
 import { flowDesignEvaluator } from "./evaluators/flowDesign.js";
+import { createModelSelectionLlmEvaluator } from "./evaluators/modelSelectionLlm.js";
+import { createQualityLlmEvaluator } from "./evaluators/qualityLlm.js";
 import { modelSelectionEvaluator } from "./evaluators/modelSelection.js";
 import { qualityEvaluator } from "./evaluators/quality.js";
 import { tokenContextEvaluator } from "./evaluators/tokenContext.js";
 import { criticalPathMs, scheduleMs, totalRunCostUsd } from "./helpers.js";
-import type { EvaluationInput, Evaluator } from "./types.js";
+import type { AnalyzeOptions, EvaluationInput, Evaluator, EvaluatorProgress, ModelClient } from "./types.js";
 
+/** Rule-based evaluators; need no model. */
 export const defaultEvaluators: Evaluator[] = [qualityEvaluator, modelSelectionEvaluator, tokenContextEvaluator, flowDesignEvaluator];
+
+/**
+ * Quality and Model Selection judged by a model through `client` (each falls back to its rules if
+ * the model is unavailable); Token & Context and Flow Design stay rule-based.
+ */
+export function createEvaluators(client: ModelClient): Evaluator[] {
+  return [createQualityLlmEvaluator(client), createModelSelectionLlmEvaluator(client), tokenContextEvaluator, flowDesignEvaluator];
+}
 
 export const CATEGORIES: RecommendationCategory[] = ["quality", "model-selection", "token-context", "flow-design"];
 
@@ -35,19 +46,53 @@ export function compareRecommendations(a: Recommendation, b: Recommendation): nu
 
 /**
  * Runs every evaluator over a completed run and merges their recommendations, highest priority
- * first. An evaluator that fails (e.g. no model access) is reported in `skippedEvaluators`.
+ * first. When a model-backed evaluator fails, its rule-based fallback runs instead
+ * (`fallbackEvaluators`); an evaluator that can't run at all is listed in `skippedEvaluators`.
  */
-export async function analyzeRun(input: EvaluationInput, evaluators: Evaluator[] = defaultEvaluators): Promise<EvaluationResult> {
-  const settled = await Promise.allSettled(evaluators.map((evaluator) => evaluator.evaluate(input)));
+export async function analyzeRun(
+  input: EvaluationInput,
+  evaluators: Evaluator[] = defaultEvaluators,
+  options: AnalyzeOptions = {},
+): Promise<EvaluationResult> {
   const skippedEvaluators: SkippedEvaluator[] = [];
-  const recommendations = settled
-    .flatMap((result, i) => {
-      if (result.status === "fulfilled") return result.value;
-      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
-      skippedEvaluators.push({ evaluatorId: evaluators[i].id, category: evaluators[i].category, reason });
-      return [];
-    })
-    .sort(compareRecommendations);
+  const fallbackEvaluators: SkippedEvaluator[] = [];
+  const reasonOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+  const results = await Promise.all(
+    evaluators.map(async (evaluator) => {
+      const report = (update: Pick<EvaluatorProgress, "status" | "recommendations" | "reason">) =>
+        options.onProgress?.({
+          evaluatorId: evaluator.id,
+          name: evaluator.name,
+          category: evaluator.category,
+          modelBacked: Boolean(evaluator.fallback),
+          ...update,
+        });
+      report({ status: "running" });
+      try {
+        const recommendations = await evaluator.evaluate(input);
+        report({ status: "done", recommendations: recommendations.length });
+        return recommendations;
+      } catch (error) {
+        const entry = { evaluatorId: evaluator.id, category: evaluator.category, reason: reasonOf(error) };
+        if (evaluator.fallback) {
+          try {
+            const recommendations = await evaluator.fallback.evaluate(input);
+            fallbackEvaluators.push(entry);
+            report({ status: "fallback", recommendations: recommendations.length, reason: entry.reason });
+            return recommendations;
+          } catch (fallbackError) {
+            entry.reason = `${entry.reason}; fallback failed: ${reasonOf(fallbackError)}`;
+          }
+        }
+        skippedEvaluators.push(entry);
+        report({ status: "skipped", reason: entry.reason });
+        return [];
+      }
+    }),
+  );
+
+  const recommendations = results.flat().sort(compareRecommendations);
   const createdAt = new Date().toISOString();
   return {
     id: `eval_${input.run.id}_${Date.parse(createdAt)}`,
@@ -56,6 +101,7 @@ export async function analyzeRun(input: EvaluationInput, evaluators: Evaluator[]
     createdAt,
     evaluatorIds: evaluators.map((e) => e.id),
     skippedEvaluators,
+    fallbackEvaluators,
     recommendations,
     summary: summarize(input, recommendations),
   };
