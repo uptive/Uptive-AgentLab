@@ -1,8 +1,14 @@
 import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
-import type { AgentDefinition, AgentInput, AgentStatus, ToolRef } from "@agentlab/contracts";
+import { MODEL_CATALOG, type AgentDefinition, type AgentInput, type AgentStatus, type ToolRef } from "@agentlab/contracts";
 import { theme } from "../theme.js";
+import { SkillPicker, ToolPicker } from "../library/ToolPicker.js";
+import { useLibrary } from "../library/useLibrary.js";
 
-const MODELS = ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-fable-5-1"];
+const MODELS = MODEL_CATALOG.map((m) => m.id);
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+/** Opens the Tools & skills view (handled by App). */
+const openLibrary = () => window.dispatchEvent(new CustomEvent("agentlab:navigate", { detail: "library" }));
 
 interface FormState {
   name: string;
@@ -10,10 +16,11 @@ interface FormState {
   status: AgentStatus;
   description: string;
   model: string;
-  temperature: string;
-  maxTokens: string;
+  effort: string;
+  maxTurns: string;
   systemInstructions: string;
   tools: ToolRef[];
+  skills: string[];
   inputSchema: string;
   outputSchema: string;
   limitMaxTokens: string;
@@ -26,10 +33,11 @@ const EMPTY_FORM: FormState = {
   status: "draft",
   description: "",
   model: "claude-sonnet-5",
-  temperature: "",
-  maxTokens: "",
+  effort: "",
+  maxTurns: "",
   systemInstructions: "",
   tools: [],
+  skills: [],
   inputSchema: "",
   outputSchema: "",
   limitMaxTokens: "",
@@ -45,10 +53,11 @@ function toForm(agent: AgentDefinition): FormState {
     status: agent.status ?? "draft",
     description: agent.description ?? "",
     model: agent.model,
-    temperature: agent.modelSettings?.temperature?.toString() ?? "",
-    maxTokens: agent.modelSettings?.maxTokens?.toString() ?? "",
+    effort: typeof agent.modelSettings?.effort === "string" ? agent.modelSettings.effort : "",
+    maxTurns: agent.modelSettings?.maxTurns?.toString() ?? "",
     systemInstructions: agent.systemInstructions,
     tools: agent.tools,
+    skills: agent.skills ?? [],
     inputSchema: stringifySchema(agent.inputSchema),
     outputSchema: stringifySchema(agent.outputSchema),
     limitMaxTokens: agent.limits?.maxTokens?.toString() ?? "",
@@ -76,11 +85,15 @@ function toInput(form: FormState, existing?: AgentDefinition): AgentInput {
     model: form.model.trim(),
     modelSettings: {
       ...existing?.modelSettings,
-      temperature: toNumber(form.temperature),
-      maxTokens: toNumber(form.maxTokens),
+      // Current Claude models reject sampling settings; effort and turns are what the runtime uses.
+      temperature: undefined,
+      maxTokens: undefined,
+      effort: form.effort || undefined,
+      maxTurns: toNumber(form.maxTurns),
     },
     systemInstructions: form.systemInstructions,
     tools: form.tools,
+    skills: form.skills,
     inputSchema: parseSchema("Input schema", form.inputSchema),
     outputSchema: parseSchema("Output schema", form.outputSchema),
     limits: { maxTokens: toNumber(form.limitMaxTokens), maxCostUsd: toNumber(form.limitMaxCostUsd) },
@@ -248,85 +261,6 @@ function StatInput({
 
 const twoColumns: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
 
-function ToolChips({ tools, onChange }: { tools: ToolRef[]; onChange: (tools: ToolRef[]) => void }) {
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<ToolRef["kind"]>("function");
-
-  function add() {
-    const trimmed = name.trim();
-    if (!trimmed || tools.some((tool) => tool.name === trimmed)) return;
-    onChange([...tools, { id: trimmed.toLowerCase().replace(/\s+/g, "-"), name: trimmed, kind }]);
-    setName("");
-  }
-
-  return (
-    <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: tools.length ? 10 : 0 }}>
-        {tools.map((tool) => (
-          <span
-            key={tool.id}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "4px 6px 4px 12px",
-              borderRadius: 999,
-              border: `1px solid ${theme.border}`,
-              background: theme.codeBg,
-              fontSize: 13,
-              color: theme.text,
-            }}
-          >
-            {tool.name}
-            <span style={{ fontFamily: theme.fontMono, fontSize: 11, color: theme.textMuted }}>{tool.kind}</span>
-            <button
-              type="button"
-              aria-label={`Remove ${tool.name}`}
-              onClick={() => onChange(tools.filter((t) => t.id !== tool.id))}
-              style={{
-                border: "none",
-                background: "transparent",
-                color: theme.textMuted,
-                cursor: "pointer",
-                fontSize: 16,
-                lineHeight: 1,
-                padding: "0 4px",
-              }}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          style={fieldInput}
-          value={name}
-          placeholder="Tool name"
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add();
-            }
-          }}
-        />
-        <select
-          style={{ ...fieldInput, width: 130 }}
-          value={kind}
-          onChange={(e) => setKind(e.target.value as ToolRef["kind"])}
-        >
-          <option value="function">function</option>
-          <option value="mcp">mcp</option>
-        </select>
-        <button type="button" style={{ ...ghostButton, flexShrink: 0 }} onClick={add}>
-          Add
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function AgentCard({ agent, onOpen }: { agent: AgentDefinition; onOpen: () => void }) {
   return (
     <button
@@ -389,6 +323,13 @@ export function AgentsView() {
   const [editing, setEditing] = useState<AgentDefinition | null>();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const library = useLibrary();
+  const refreshLibrary = library.refresh;
+
+  // Pick up services and skills added in Tools & skills since the view was opened.
+  useEffect(() => {
+    if (editing !== undefined) void refreshLibrary();
+  }, [editing, refreshLibrary]);
 
   async function refresh() {
     setLoading(true);
@@ -604,13 +545,40 @@ export function AgentsView() {
 
               <Section title="Model settings">
                 <div style={twoColumns}>
-                  <StatInput label="Temperature" min={0} max={1} step={0.1} value={form.temperature} onChange={set("temperature")} />
-                  <StatInput label="Max tokens" min={1} step={1} value={form.maxTokens} onChange={set("maxTokens")} />
+                  <label
+                    style={{ display: "block", padding: "10px 12px", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.codeBg }}
+                    title="How hard Claude thinks. Lower is faster and cheaper; higher is better for hard problems."
+                  >
+                    <span style={{ display: "block", fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>Effort</span>
+                    <select value={form.effort} onChange={set("effort")} style={{ ...fieldInput, padding: "2px 0", border: "none", background: "transparent", fontSize: 16 }}>
+                      <option value="">Model default</option>
+                      {EFFORTS.map((e) => (
+                        <option key={e} value={e}>
+                          {e}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <StatInput label="Max turns (model calls)" min={1} step={1} value={form.maxTurns} onChange={set("maxTurns")} />
                 </div>
               </Section>
 
-              <Section title="Allowed tools">
-                <ToolChips tools={form.tools} onChange={(tools) => setForm((prev) => ({ ...prev, tools }))} />
+              <Section title="Tools">
+                <ToolPicker
+                  tools={form.tools}
+                  servers={library.servers}
+                  onChange={(tools) => setForm((prev) => ({ ...prev, tools }))}
+                  onOpenLibrary={openLibrary}
+                />
+              </Section>
+
+              <Section title="Skills">
+                <SkillPicker
+                  selected={form.skills}
+                  skills={library.skills}
+                  onChange={(skills) => setForm((prev) => ({ ...prev, skills }))}
+                  onOpenLibrary={openLibrary}
+                />
               </Section>
 
               <Section title="Input / output schema">

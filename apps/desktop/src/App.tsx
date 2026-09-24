@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AgentsView } from "./views/AgentsView.js";
 import { FlowsView } from "./views/FlowsView.js";
 import { RunsView } from "./views/RunsView.js";
 import { OptimizeView } from "./views/OptimizeView.js";
+import { LibraryView } from "./views/LibraryView.js";
+import { AuthStatus } from "./AuthStatus.js";
 import { theme, useTheme } from "./theme.js";
 
 const TABS = [
@@ -10,10 +12,23 @@ const TABS = [
   { id: "flows", label: "Flows", view: FlowsView, fullBleed: true },
   { id: "runs", label: "Runs", view: RunsView, fullBleed: false },
   { id: "optimize", label: "Optimize", view: OptimizeView, fullBleed: false },
+  { id: "library", label: "Tools & skills", view: LibraryView, fullBleed: false },
 ] as const;
 
+type TabId = (typeof TABS)[number]["id"];
+
 export function App() {
-  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["id"]>("agents");
+  const [activeTab, setActiveTab] = useState<TabId>("agents");
+
+  // Views can ask to switch tabs, e.g. the agent editor's "Connect one" link.
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (TABS.some((tab) => tab.id === id)) setActiveTab(id as TabId);
+    };
+    window.addEventListener("agentlab:navigate", onNavigate);
+    return () => window.removeEventListener("agentlab:navigate", onNavigate);
+  }, []);
   const { view: ActiveView, fullBleed } = TABS.find((tab) => tab.id === activeTab)!;
   const { mode, toggle } = useTheme();
 
@@ -50,11 +65,11 @@ export function App() {
             {tab.label}
           </button>
         ))}
+        <AuthStatus />
         <button
           onClick={toggle}
           aria-label={`Switch to ${mode === "dark" ? "light" : "dark"} mode`}
           style={{
-            marginTop: "auto",
             padding: "8px 12px",
             border: `1px solid ${theme.border}`,
             borderRadius: 999,
