@@ -1,16 +1,20 @@
-/* Optimize view. Colors come from theme.css; mint is the only accent. */
+/* Optimize view. Every color comes from the shared tokens in theme.css, so the view follows the
+   app's light/dark theme. The primary color ("mint" in dark mode) is the only accent: it means "you gain this". */
 .opt {
-  --ink: var(--color-bg-black);
-  --surface: var(--color-bg-grey);
-  --paper: var(--color-secondary);
-  --mint: var(--color-accent);
-  --muted: rgba(253, 253, 253, 0.58);
-  --faint: rgba(253, 253, 253, 0.36);
-  --hairline: rgba(253, 253, 253, 0.08);
-  --hover: rgba(253, 253, 253, 0.035);
-  --high: #ff8a7a;
-  --medium: #e8c07a;
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --page: var(--color-page-bg);
+  --surface: var(--color-surface);
+  --code: var(--color-code-bg);
+  --paper: var(--color-text);
+  --mint: var(--color-primary);
+  --on-mint: var(--color-on-primary);
+  --muted: var(--color-text-secondary);
+  --faint: var(--color-text-muted);
+  --hairline: var(--color-border);
+  --hover: var(--color-surface-selected);
+  --bar: color-mix(in srgb, var(--color-text) 22%, transparent);
+  --high: var(--color-danger);
+  --medium: var(--color-warning);
+  --mono: var(--font-mono);
 
   max-width: 1040px;
   margin: 0 auto;
@@ -83,7 +87,7 @@
   border: 1px solid var(--hairline);
   border-radius: 10px;
   background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23fdfdfd' stroke-opacity='.6' fill='none' stroke-width='1.5'/%3E%3C/svg%3E")
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238a8a8a' fill='none' stroke-width='1.5'/%3E%3C/svg%3E")
       no-repeat right 14px center,
     var(--surface);
   color: var(--paper);
@@ -95,7 +99,7 @@
   padding: 10px 18px;
   border-radius: 10px;
   background: var(--mint);
-  color: var(--ink);
+  color: var(--on-mint);
   font-weight: 600;
   font-size: 14px;
 }
@@ -206,7 +210,7 @@
   margin: 24px 0 0;
   padding: 12px 16px;
   border-radius: 10px;
-  background: rgba(232, 192, 122, 0.08);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
   color: var(--medium);
   font-size: 14px;
 }
@@ -230,7 +234,7 @@
 }
 
 .opt-legend .measured::before {
-  background: rgba(253, 253, 253, 0.2);
+  background: var(--bar);
 }
 
 .opt-legend .projected::before {
@@ -289,7 +293,7 @@
 
 .opt-tl-bar.measured {
   top: 6px;
-  background: rgba(253, 253, 253, 0.2);
+  background: var(--bar);
 }
 
 .opt-tl-bar.projected {
@@ -397,7 +401,7 @@
 }
 
 .opt-filters button[aria-pressed="true"] {
-  background: var(--ink);
+  background: var(--page);
   color: var(--paper);
 }
 
@@ -576,7 +580,7 @@
 .opt-change-inline .before {
   color: var(--faint);
   text-decoration: line-through;
-  text-decoration-color: rgba(255, 138, 122, 0.6);
+  text-decoration-color: color-mix(in srgb, var(--color-danger) 60%, transparent);
 }
 
 .opt-change-inline .after {
@@ -607,7 +611,7 @@
   overflow: auto;
   padding: 14px 16px;
   border-radius: 10px;
-  background: var(--ink);
+  background: var(--code);
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.6;
