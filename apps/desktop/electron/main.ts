@@ -8,6 +8,7 @@ import {
   DEFAULT_AGENT_ROLES,
   type AgentDefinition,
   type AgentInput,
+  type AgentRunContext,
   type AgentRoleStore,
   type AgentStore,
   type FlowDefinition,
@@ -24,8 +25,20 @@ import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
 import type { JsonRequest } from "@agentlab/optimization";
 import { createAnthropicModelClient } from "@agentlab/optimization/anthropic";
 import { generateAgentDraft } from "./agentDraft.js";
-import { IPC, type AgentDraftRequest, type AgentListing, type AgentSource, type ProjectEntry, type SourcedAgent } from "./api.js";
+import { createClaudeCliRuntime } from "@agentlab/agent-runtime/claude-cli";
+import {
+  IPC,
+  type AgentDraftRequest,
+  type AgentListing,
+  type AgentSource,
+  type ProjectEntry,
+  type SourcedAgent,
+  type ToolActionResult,
+  type ToolOutputStream,
+  type ToolRunRequest,
+} from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
+import { LocalToolRegistry } from "./localTools.js";
 import { listMcpSources } from "./mcpConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,6 +73,7 @@ interface Stores {
 }
 
 let stores: Promise<Stores> | undefined;
+const tools = new LocalToolRegistry();
 
 async function connect(): Promise<Stores> {
   const uri = process.env.MONGODB_URI;
@@ -153,7 +167,7 @@ const JSON_FILTERS = [{ name: "Flow definition", extensions: ["json"] }];
 const slugify = (s: string) =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "flow";
 
-function registerIpc(store: EditorConfigStore) {
+function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   /** Renderer may only touch files the user registered via the project view. */
   const assertRegistered = async (filePath: string) => {
     if (!(await store.isRegistered(filePath))) throw new Error(`Flow file is not registered in the project: ${filePath}`);
@@ -219,6 +233,53 @@ function registerIpc(store: EditorConfigStore) {
     await writeFile(filePath, json, "utf8");
     return store.entry(filePath);
   });
+
+  /** Streams a run's output back to the window that started it. */
+  const forwardOutput = (sender: Electron.WebContents, runId: string | undefined) =>
+    runId === undefined
+      ? undefined
+      : (stream: ToolOutputStream, chunk: string) => {
+          if (!sender.isDestroyed()) sender.send(IPC.toolOutput, { runId, stream, chunk });
+        };
+
+  ipcMain.handle(IPC.listTools, () => tools.list());
+  ipcMain.handle(IPC.refreshTools, () => tools.refresh());
+  ipcMain.handle(IPC.runTool, (event, request: ToolRunRequest) =>
+    tools.run(request, { onOutput: forwardOutput(event.sender, request.runId) }),
+  );
+  ipcMain.handle(IPC.cancelTool, (_e, runId: string) => tools.cancel(runId));
+
+  // The confirmation lives here, not in the renderer, so nothing can install without the user saying yes.
+  ipcMain.handle(IPC.installTool, async (event, toolId: string, runId?: string): Promise<ToolActionResult> => {
+    const command = tools.installCommand(toolId);
+    const tool = (await tools.list()).find((t) => t.id === toolId);
+    if (!command || !tool) throw new Error(`AgentLab cannot install "${toolId}" on this platform`);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options: Electron.MessageBoxOptions = {
+      type: "question",
+      buttons: ["Install", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+      message: `Install ${tool.name}?`,
+      detail: `AgentLab will download and run the official installer:\n\n${command}\n\nMore info: ${tool.docsUrl}`,
+    };
+    const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+    if (response !== 0) return { confirmed: false };
+    return { confirmed: true, ...(await tools.install(toolId, { runId, onOutput: forwardOutput(event.sender, runId) })) };
+  });
+
+  ipcMain.handle(IPC.fixToolSetup, async (event, toolId: string, runId?: string): Promise<ToolActionResult> => ({
+    confirmed: true,
+    ...(await tools.fixSetup(toolId, { runId, onOutput: forwardOutput(event.sender, runId) })),
+  }));
+
+  // Agents run on the local Claude Code CLI; the flow engine in the renderer uses this as its AgentRuntime.
+  const claudeRuntime = createClaudeCliRuntime({
+    exec: (args, { input, cwd, timeoutMs }) => tools.run({ toolId: "claude", args, input, cwd, timeoutMs: timeoutMs ?? 10 * 60_000 }),
+  });
+  ipcMain.handle(IPC.runAgent, (_e, agent: AgentDefinition, input: unknown, context: AgentRunContext) =>
+    claudeRuntime.run(agent, input, context),
+  );
 
   ipcMain.handle("agents:load", async (_e, options?: { reloadLocal?: boolean }): Promise<AgentListing> => {
     await (options?.reloadLocal ? loadLocalAgents() : localAgentsLoaded);
@@ -318,6 +379,12 @@ function createWindow() {
     },
   });
 
+  // Links with target="_blank" open in the user's browser instead of a new app window.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://")) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
   } else {
@@ -331,7 +398,11 @@ app.whenReady().then(() => {
     path.join(app.getPath("documents"), "AgentLab", "Flows"),
   );
   void loadLocalAgents();
-  registerIpc(store);
+  registerIpc(store, tools);
+  tools.list().then(
+    (found) => console.log(`[tools] ${found.filter((t) => t.installed).map((t) => t.id).join(", ") || "none"} available`),
+    (error) => console.error("[tools] detection failed:", error.message),
+  );
   getStores().then(
     () => console.log("[db] connected to MongoDB"),
     (error) => console.error("[db] MongoDB connection failed:", error.message),
@@ -352,5 +423,6 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  tools.dispose();
   stores?.then(({ client }) => client.close()).catch(() => {});
 });
