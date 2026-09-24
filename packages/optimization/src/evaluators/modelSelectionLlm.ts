@@ -2,6 +2,7 @@ import type { Recommendation, RecommendationSeverity } from "@agentlab/contracts
 import { MODEL_CATALOG, getModel } from "../modelCatalog.js";
 import { agentFor, modelCallAttempts } from "../helpers.js";
 import type { EvaluationInput, Evaluator, ModelClient } from "../types.js";
+import { TAG_INSTRUCTIONS, TAGS_SCHEMA, toTags } from "../tags.js";
 import { excerpt, runTask } from "./llmFacts.js";
 import { modelChangeImpact, modelSelectionEvaluator } from "./modelSelection.js";
 
@@ -13,6 +14,7 @@ interface ModelFinding {
   problem: string;
   suggestion: string;
   severity: RecommendationSeverity;
+  tags?: string[];
   evidence: string[];
 }
 
@@ -22,7 +24,9 @@ For each step, judge whether its model fits the work the step actually does:
 - Overpowered: a strong, expensive model on work a smaller model does just as well, such as planning, routing, extraction or formatting against a schema.
 - Underpowered: a small model on work that needs more judgment (open-ended review, reasoning over long input), especially when it needed retries, failed, or produced weak or unstructured output.
 
-Report only steps where a different model from the catalog is clearly better; leave well-matched steps out. recommendedModel must be a model id from the catalog and different from the step's current model. Do not estimate cost or time savings; they are calculated separately. In problem and suggestion, name the concrete reason (for example the kind of work, the output size, or the retries). Cite the numbers you rely on in evidence.`;
+Report only steps where a different model from the catalog is clearly better; leave well-matched steps out. recommendedModel must be a model id from the catalog and different from the step's current model. Do not estimate cost or time savings; they are calculated separately. In problem and suggestion, name the concrete reason (for example the kind of work, the output size, or the retries). Cite the numbers you rely on in evidence.
+
+${TAG_INSTRUCTIONS}`;
 
 const SCHEMA = {
   type: "object",
@@ -34,13 +38,14 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["nodeId", "recommendedModel", "problem", "suggestion", "severity", "evidence"],
+        required: ["nodeId", "recommendedModel", "problem", "suggestion", "severity", "tags", "evidence"],
         properties: {
           nodeId: { type: "string" },
           recommendedModel: { type: "string", enum: MODEL_CATALOG.map((m) => m.id) },
           problem: { type: "string" },
           suggestion: { type: "string" },
           severity: { type: "string", enum: ["high", "medium", "low"] },
+          tags: TAGS_SCHEMA,
           evidence: { type: "array", items: { type: "string" } },
         },
       },
@@ -102,6 +107,8 @@ export function createModelSelectionLlmEvaluator(client: ModelClient): Evaluator
           id,
           evaluatorId: EVALUATOR_ID,
           category: "model-selection",
+          // The model's tags, plus what the calculated impact shows (e.g. Cost when the price changes).
+          tags: toTags(finding.tags ?? [], change.tags),
           title: `${agent.name} → ${alternative.label}`,
           severity: finding.severity,
           target: { kind: "node", nodeId: step.nodeId, agentId: agent.id },
