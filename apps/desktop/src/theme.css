@@ -1,0 +1,13 @@
+:root {
+  --color-accent: #6eeba1;
+  --color-secondary: #fdfdfd;
+  --color-bg-black: #202123;
+  --color-bg-grey: #313131;
+  --color-bg-card: #505050;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg-black);
+  color: var(--color-secondary);
+}

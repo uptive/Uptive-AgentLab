@@ -3,6 +3,7 @@ import { AgentsView } from "./views/AgentsView.js";
 import { FlowsView } from "./views/FlowsView.js";
 import { RunsView } from "./views/RunsView.js";
 import { OptimizeView } from "./views/OptimizeView.js";
+import { colors } from "./theme.js";
 
 const TABS = [
   { id: "agents", label: "Agents", view: AgentsView },
@@ -16,8 +17,16 @@ export function App() {
   const ActiveView = TABS.find((tab) => tab.id === activeTab)!.view;
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
-      <nav style={{ width: 160, borderRight: "1px solid #ddd", padding: 8 }}>
+    <div
+      style={{
+        display: "flex",
+        height: "100vh",
+        fontFamily: "system-ui, sans-serif",
+        background: colors.bgBlack,
+        color: colors.secondary,
+      }}
+    >
+      <nav style={{ width: 160, borderRight: `1px solid ${colors.bgGrey}`, padding: 8, background: colors.bgGrey }}>
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -30,7 +39,9 @@ export function App() {
               marginBottom: 4,
               border: "none",
               borderRadius: 6,
-              background: activeTab === tab.id ? "#e5e7eb" : "transparent",
+              background: activeTab === tab.id ? colors.accent : "transparent",
+              color: activeTab === tab.id ? colors.bgBlack : colors.secondary,
+              fontWeight: activeTab === tab.id ? 600 : 400,
               cursor: "pointer",
             }}
           >
