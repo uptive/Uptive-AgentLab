@@ -82,11 +82,21 @@ export interface CategorySummary {
   latencyMs?: number;
 }
 
+export interface StepTiming {
+  nodeId: string;
+  /** Offsets from the run start, as recorded. */
+  measured: { startMs: number; endMs: number };
+  /** Offsets from the run start if every recommendation is applied. */
+  projected: { startMs: number; endMs: number };
+}
+
 export interface EvaluationSummary {
   baseline: { costUsd: number; latencyMs: number };
   /** Estimated run cost/latency with every recommendation applied. */
   projected: { costUsd: number; latencyMs: number };
   byCategory: Record<RecommendationCategory, CategorySummary>;
+  /** Per-step timing, measured vs projected, in flow order. */
+  timeline: StepTiming[];
   /** Highest-priority recommendations: by severity, then quality risk, then cost saved, then latency saved. */
   topRecommendationIds: string[];
 }

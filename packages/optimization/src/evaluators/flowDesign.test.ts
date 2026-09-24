@@ -61,5 +61,11 @@ describe("Flow Design evaluator", () => {
     );
     expect(result.summary.byCategory["flow-design"]).toMatchObject({ count: 1, latencyMs: -14_500 });
     expect(result.summary.projected.latencyMs).toBeLessThan(result.summary.baseline.latencyMs - 14_500 - 5_000);
+
+    // Timeline: with all fixes, Security Reviewer starts when Planner ends, alongside Code Reviewer.
+    const at = (nodeId: string) => result.summary.timeline.find((t) => t.nodeId === nodeId)!;
+    expect(at("security-review").measured.startMs).toBe(21_500);
+    expect(at("security-review").projected.startMs).toBe(at("plan").projected.endMs);
+    expect(at("code-review").projected.startMs).toBe(at("plan").projected.endMs);
   });
 });

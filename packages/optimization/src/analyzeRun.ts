@@ -6,12 +6,13 @@ import type {
   RecommendationCategory,
   RecommendationSeverity,
   SkippedEvaluator,
+  StepTiming,
 } from "@agentlab/contracts";
 import { flowDesignEvaluator } from "./evaluators/flowDesign.js";
 import { modelSelectionEvaluator } from "./evaluators/modelSelection.js";
 import { qualityEvaluator } from "./evaluators/quality.js";
 import { tokenContextEvaluator } from "./evaluators/tokenContext.js";
-import { criticalPathMs, totalRunCostUsd } from "./helpers.js";
+import { criticalPathMs, scheduleMs, totalRunCostUsd } from "./helpers.js";
 import type { EvaluationInput, Evaluator } from "./types.js";
 
 export const defaultEvaluators: Evaluator[] = [qualityEvaluator, modelSelectionEvaluator, tokenContextEvaluator, flowDesignEvaluator];
@@ -76,6 +77,14 @@ function project(input: EvaluationInput, recommendations: Recommendation[]): { c
   }
 
   // Latency: apply step-level changes and re-wired dependencies, then recompute the critical path.
+  const { stepDeltas, dependsOnOverrides } = latencyChanges(recommendations);
+  const baselineLatency = input.run.totalUsage?.latencyMs ?? criticalPathMs(input);
+  const latencyDelta = criticalPathMs(input, stepDeltas, dependsOnOverrides) - criticalPathMs(input);
+  return { costUsd, latencyMs: baselineLatency + Math.round(latencyDelta) };
+}
+
+/** Step latency changes and re-wired dependencies implied by a set of recommendations. */
+function latencyChanges(recommendations: Recommendation[]) {
   const stepDeltas = new Map<string, number>();
   const dependsOnOverrides = new Map<string, string[]>();
   for (const r of recommendations) {
@@ -87,9 +96,24 @@ function project(input: EvaluationInput, recommendations: Recommendation[]): { c
       dependsOnOverrides.set(nodeId, r.change.after as string[]);
     }
   }
-  const baselineLatency = input.run.totalUsage?.latencyMs ?? criticalPathMs(input);
-  const latencyDelta = criticalPathMs(input, stepDeltas, dependsOnOverrides) - criticalPathMs(input);
-  return { costUsd, latencyMs: baselineLatency + Math.round(latencyDelta) };
+  return { stepDeltas, dependsOnOverrides };
+}
+
+/** Measured start/end of each step, next to where it would run with every recommendation applied. */
+function timeline(input: EvaluationInput, recommendations: Recommendation[]): StepTiming[] {
+  const { stepDeltas, dependsOnOverrides } = latencyChanges(recommendations);
+  const projected = scheduleMs(input, stepDeltas, dependsOnOverrides);
+  const modelled = scheduleMs(input);
+  const runStart = Date.parse(input.run.startedAt);
+  return input.flow.nodes.map((node) => {
+    const step = input.run.steps.find((s) => s.nodeId === node.id);
+    const measured =
+      step?.startedAt && step.completedAt
+        ? { startMs: Date.parse(step.startedAt) - runStart, endMs: Date.parse(step.completedAt) - runStart }
+        : modelled.get(node.id)!;
+    const p = projected.get(node.id)!;
+    return { nodeId: node.id, measured, projected: { startMs: Math.round(p.startMs), endMs: Math.round(p.endMs) } };
+  });
 }
 
 export function summarize(input: EvaluationInput, recommendations: Recommendation[]): EvaluationSummary {
@@ -115,6 +139,7 @@ export function summarize(input: EvaluationInput, recommendations: Recommendatio
     baseline,
     projected: project(input, recommendations),
     byCategory,
+    timeline: timeline(input, recommendations),
     topRecommendationIds: [...recommendations].sort(compareRecommendations).slice(0, TOP_FIXES).map((r) => r.id),
   };
 }

@@ -89,29 +89,38 @@ export function stepLatencyMs(step: StepRun): number {
 }
 
 /**
- * Longest path through the flow using each step's latency, with optional per-node latency
- * changes and re-wired dependencies applied. Parallel branches only count once: the slowest one
- * sets the pace.
+ * Start/end of every node when each starts as soon as its dependencies finish, using each step's
+ * measured latency with optional per-node latency changes and re-wired dependencies applied.
  */
-export function criticalPathMs(
+export function scheduleMs(
   input: EvaluationInput,
   stepDeltaMs: Map<string, number> = new Map(),
   dependsOnOverrides: Map<string, string[]> = new Map(),
-): number {
-  const finish = new Map<string, number>();
-  const finishOf = (nodeId: string): number => {
-    const cached = finish.get(nodeId);
-    if (cached !== undefined) return cached;
+): Map<string, { startMs: number; endMs: number }> {
+  const schedule = new Map<string, { startMs: number; endMs: number }>();
+  const endOf = (nodeId: string): number => {
+    const cached = schedule.get(nodeId);
+    if (cached) return cached.endMs;
     const node = input.flow.nodes.find((n) => n.id === nodeId);
     const step = stepForNode(input, nodeId);
     const base = step ? stepLatencyMs(step) : 0;
     const own = Math.max(base + (stepDeltaMs.get(nodeId) ?? 0), base * 0.1);
     const deps = dependsOnOverrides.get(nodeId) ?? node?.dependsOn ?? [];
-    const value = Math.max(0, ...deps.map(finishOf)) + own;
-    finish.set(nodeId, value);
-    return value;
+    const startMs = Math.max(0, ...deps.map(endOf));
+    schedule.set(nodeId, { startMs, endMs: startMs + own });
+    return startMs + own;
   };
-  return Math.max(0, ...input.flow.nodes.map((n) => finishOf(n.id)));
+  input.flow.nodes.forEach((n) => endOf(n.id));
+  return schedule;
+}
+
+/** Longest path through the flow. Parallel branches only count once: the slowest one sets the pace. */
+export function criticalPathMs(
+  input: EvaluationInput,
+  stepDeltaMs: Map<string, number> = new Map(),
+  dependsOnOverrides: Map<string, string[]> = new Map(),
+): number {
+  return Math.max(0, ...[...scheduleMs(input, stepDeltaMs, dependsOnOverrides).values()].map((t) => t.endMs));
 }
 
 /** Upstream node ids whose output this node actually reads through its input mapping. */
