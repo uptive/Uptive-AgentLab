@@ -385,10 +385,14 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   });
 }
 
+// Packaged builds get their icon from electron-builder; dev runs need it set explicitly.
+const DEV_ICON = app.isPackaged ? undefined : path.join(__dirname, "../build/icon.png");
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
+    icon: DEV_ICON,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -411,6 +415,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (DEV_ICON && process.platform === "darwin") app.dock?.setIcon(DEV_ICON);
   const store = new EditorConfigStore(
     path.join(app.getPath("userData"), "editor-config.json"),
     path.join(app.getPath("documents"), "AgentLab", "Flows"),
