@@ -9,3 +9,4 @@ export const runtime: AgentRuntime = {
 };
 
 export * from "./demo.js";
+export * from "./tools.js";

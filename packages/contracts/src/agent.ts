@@ -8,10 +8,20 @@ export interface ModelSettings {
   [key: string]: unknown;
 }
 
+/**
+ * A tool an agent may use.
+ * - "builtin": a Claude Code tool such as Read, Grep, Glob, WebSearch, WebFetch or Bash (`name` is the tool name).
+ * - "mcp": a tool on a registered MCP server (`serverId`); omit `toolName` to allow every tool on that server.
+ * - "function": an in-process tool implemented by the app (`id` is the function tool id).
+ */
 export interface ToolRef {
   id: string;
   name: string;
-  kind: "mcp" | "function";
+  kind: "builtin" | "mcp" | "function";
+  /** For kind "mcp": id of the `McpServerDefinition` that provides the tool. */
+  serverId?: string;
+  /** For kind "mcp": the tool's name on that server; omitted means all of the server's tools. */
+  toolName?: string;
 }
 
 export interface UsageLimits {
@@ -32,6 +42,8 @@ export interface AgentDefinition {
   model: ModelId;
   modelSettings?: ModelSettings;
   tools: ToolRef[];
+  /** Names of skills (see `SkillDefinition`) the agent may load. */
+  skills?: string[];
   inputSchema?: unknown;
   outputSchema?: unknown;
   limits?: UsageLimits;
@@ -51,6 +63,53 @@ export interface AgentStore {
   update(id: string, patch: Partial<AgentInput>): Promise<AgentDefinition>;
   /** Returns false if the agent did not exist. */
   delete(id: string): Promise<boolean>;
+}
+
+/** An MCP server that agents can use tools from. Secrets are never stored here, only referenced. */
+export interface McpServerDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  transport:
+    | { type: "http"; url: string }
+    | { type: "stdio"; command: string; args?: string[] };
+  /**
+   * Name of a secret held by the app (not in this file). For "http" it is sent as a bearer token,
+   * for "stdio" it is passed as the environment variable `secretEnvVar`.
+   */
+  secretRef?: string;
+  secretEnvVar?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type McpServerInput = Omit<McpServerDefinition, "createdAt" | "updatedAt">;
+
+export interface McpServerStore {
+  list(): Promise<McpServerDefinition[]>;
+  get(id: string): Promise<McpServerDefinition | undefined>;
+  /** Creates or replaces the server with this id. */
+  save(input: McpServerInput): Promise<McpServerDefinition>;
+  delete(id: string): Promise<boolean>;
+}
+
+/** A skill: instructions Claude loads on demand when `description` matches the task. Stored as `<name>/SKILL.md`. */
+export interface SkillDefinition {
+  /** Lowercase letters, digits and hyphens; also the folder name. */
+  name: string;
+  /** When Claude should use the skill. This is what Claude sees when deciding to load it. */
+  description: string;
+  /** The skill body (markdown). */
+  instructions: string;
+  updatedAt?: string;
+}
+
+export interface SkillStore {
+  list(): Promise<SkillDefinition[]>;
+  get(name: string): Promise<SkillDefinition | undefined>;
+  /** Creates or replaces the skill with this name. */
+  save(skill: SkillDefinition): Promise<SkillDefinition>;
+  delete(name: string): Promise<boolean>;
 }
 
 export interface AgentRunContext {

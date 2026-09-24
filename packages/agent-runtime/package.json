@@ -8,19 +8,27 @@
   "exports": {
     ".": "./src/index.ts",
     "./mongo": "./src/mongo.ts",
-    "./files": "./src/fileMirror.ts"
+    "./files": "./src/fileMirror.ts",
+    "./claude": "./src/claude/index.ts",
+    "./library": "./src/library.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:e2e": "AGENTLAB_E2E=1 vitest run test/e2e.test.ts"
   },
   "dependencies": {
     "@agentlab/contracts": "workspace:*",
-    "mongodb": "^6.21.0"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.281",
+    "mongodb": "^6.21.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9",
+    "@agentlab/flow-engine": "workspace:*"
   }
 }

@@ -28,7 +28,11 @@ export interface Run {
   completedAt?: string;
   steps: StepRun[];
   totalUsage?: Usage;
+  /** What paid for the model calls: a claude.ai subscription login, or an API key. */
+  authSource?: AuthSource;
 }
+
+export type AuthSource = "subscription" | "api-key" | "unknown";
 
 export type TraceEventType =
   | "agent_start"
