@@ -3,8 +3,10 @@ import { IPC, type AgentLabApi } from "./api.js";
 
 const api: AgentLabApi = {
   flows: {
-    save: (json, options) => ipcRenderer.invoke(IPC.saveFlow, json, options),
-    open: () => ipcRenderer.invoke(IPC.openFlow),
+    list: () => ipcRenderer.invoke(IPC.listFlows),
+    read: (id) => ipcRenderer.invoke(IPC.readFlow, id),
+    save: (id, json) => ipcRenderer.invoke(IPC.saveFlow, id, json),
+    delete: (id) => ipcRenderer.invoke(IPC.deleteFlow, id),
   },
 };
 

@@ -1,18 +1,28 @@
 /** Shared contract for the preload bridge (`window.agentlab`). Types only. */
 
-export type SaveFlowResult = { canceled: true } | { canceled: false; filePath: string };
-export type OpenFlowResult = { canceled: true } | { canceled: false; filePath: string; content: string };
+export interface FlowSummary {
+  id: string;
+  name: string;
+  description?: string;
+  updatedAt: string;
+}
 
 export interface AgentLabApi {
   flows: {
-    /** Shows a save dialog (unless `filePath` is given) and writes the JSON. */
-    save(json: string, options: { suggestedName: string; filePath?: string }): Promise<SaveFlowResult>;
-    /** Shows an open dialog and returns the selected file's contents. */
-    open(): Promise<OpenFlowResult>;
+    /** Lists all saved flows, most recently updated first. */
+    list(): Promise<FlowSummary[]>;
+    /** Reads a flow's raw JSON content by id. */
+    read(id: string): Promise<string>;
+    /** Creates or overwrites a flow's JSON content by id. */
+    save(id: string, json: string): Promise<void>;
+    /** Deletes a flow by id. */
+    delete(id: string): Promise<void>;
   };
 }
 
 export const IPC = {
+  listFlows: "flows:list",
+  readFlow: "flows:read",
   saveFlow: "flows:save",
-  openFlow: "flows:open",
+  deleteFlow: "flows:delete",
 } as const;

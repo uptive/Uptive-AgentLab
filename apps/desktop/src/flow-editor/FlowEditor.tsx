@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   addEdge,
   Background,
@@ -16,8 +16,6 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { Run, StepRun } from "@agentlab/contracts";
 import {
-  codeReviewDemoInput,
-  codeReviewFlow,
   createFlowEngine,
   createMockRuntime,
   dummyAgentRegistry,
@@ -31,13 +29,12 @@ import { colors } from "../theme.js";
 import { AgentNode } from "./AgentNode.js";
 import { AgentPalette, AGENT_DRAG_MIME } from "./AgentPalette.js";
 import { EditorContext, STATUS_COLORS, type EditorContextValue } from "./EditorContext.js";
-import { openFlowJson, saveFlowJson } from "./fileIO.js";
+import { readFlow, saveFlow } from "./fileIO.js";
 import {
   flowToGraph,
   graphToFlow,
   layoutPositions,
   makeEdge,
-  slugify,
   uniqueNodeId,
   type AgentFlowNode,
   type AgentNodeData,
@@ -52,25 +49,29 @@ const knownAgentIds = agents.map((a) => a.id);
 
 const emptyMeta = (): FlowMeta => ({ id: "untitled-flow", name: "Untitled flow" });
 
-export function FlowEditor() {
+interface Props {
+  flowId: string;
+  onBack: () => void;
+}
+
+export function FlowEditor(props: Props) {
   return (
     <ReactFlowProvider>
-      <FlowEditorInner />
+      <FlowEditorInner {...props} />
     </ReactFlowProvider>
   );
 }
 
-function FlowEditorInner() {
-  const initial = useMemo(() => flowToGraph(codeReviewFlow), []);
-  const [meta, setMeta] = useState<FlowMeta>(initial.meta);
-  const [nodes, setNodes, onNodesChange] = useNodesState<AgentFlowNode>(initial.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initial.edges);
-  const [filePath, setFilePath] = useState<string | undefined>();
+function FlowEditorInner({ flowId, onBack }: Props) {
+  const [meta, setMeta] = useState<FlowMeta>(emptyMeta());
+  const [nodes, setNodes, onNodesChange] = useNodesState<AgentFlowNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [savedJson, setSavedJson] = useState<string | undefined>();
+  const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | undefined>();
   const [run, setRun] = useState<Run | undefined>();
   const [running, setRunning] = useState(false);
-  const [runInput, setRunInput] = useState(codeReviewDemoInput.prompt);
+  const [runInput, setRunInput] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
 
@@ -185,55 +186,58 @@ function FlowEditorInner() {
     requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }));
   };
 
-  // ---- File handling -------------------------------------------------------
-  const loadGraph = (graph: ReturnType<typeof flowToGraph>, path?: string, saved?: string) => {
+  // ---- Loading & saving ------------------------------------------------------
+  const loadGraph = (graph: ReturnType<typeof flowToGraph>, saved?: string) => {
     abortRef.current?.abort();
     setMeta(graph.meta);
     setNodes(graph.nodes);
     setEdges(graph.edges);
-    setFilePath(path);
     setSavedJson(saved);
     setRun(undefined);
     requestAnimationFrame(() => fitView({ padding: 0.2 }));
   };
 
-  const confirmDiscard = () => !dirty || nodes.length === 0 || window.confirm("Discard unsaved changes?");
+  const confirmDiscard = () => !dirty || window.confirm("Discard unsaved changes?");
 
-  const newFlow = () => {
-    if (!confirmDiscard()) return;
-    loadGraph({ meta: emptyMeta(), nodes: [], edges: [] });
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
     setNotice(undefined);
-  };
+    (async () => {
+      try {
+        const content = await readFlow(flowId);
+        const parsed = parseFlow(content);
+        if (cancelled) return;
+        const graph = flowToGraph(parsed);
+        loadGraph(graph, serializeFlow(graphToFlow(graph.meta, graph.nodes, graph.edges)));
+        const issues = validateFlow(parsed, { knownAgentIds });
+        if (!issues.valid) {
+          setNotice({ kind: "error", text: `Loaded with ${issues.errors.length} problem(s): ${issues.errors[0].message}` });
+        }
+      } catch (err) {
+        if (!cancelled) setNotice({ kind: "error", text: `Could not load flow: ${err instanceof Error ? err.message : String(err)}` });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowId]);
 
-  const open = async () => {
+  const handleBack = () => {
     if (!confirmDiscard()) return;
-    try {
-      const result = await openFlowJson();
-      if (result.canceled) return;
-      const parsed = parseFlow(result.content);
-      const graph = flowToGraph(parsed);
-      // Store the normalised JSON so the file isn't reported dirty right after opening.
-      loadGraph(graph, result.filePath, serializeFlow(graphToFlow(graph.meta, graph.nodes, graph.edges)));
-      const issues = validateFlow(parsed, { knownAgentIds });
-      setNotice(
-        issues.valid
-          ? { kind: "info", text: `Opened ${result.filePath ?? parsed.name}` }
-          : { kind: "error", text: `Opened with ${issues.errors.length} problem(s): ${issues.errors[0].message}` },
-      );
-    } catch (err) {
-      setNotice({ kind: "error", text: `Could not open flow: ${err instanceof Error ? err.message : String(err)}` });
-    }
+    onBack();
   };
 
-  const save = async (saveAs = false) => {
+  const save = async () => {
     try {
-      const result = await saveFlowJson(json, slugify(meta.id || meta.name), saveAs ? undefined : filePath);
-      if (result.canceled) return;
-      setFilePath(result.filePath);
+      await saveFlow(meta.id, json);
       setSavedJson(json);
       setNotice({
         kind: validation.valid ? "info" : "error",
-        text: `Saved ${result.filePath ?? "download"}${validation.valid ? "" : " (flow has validation problems)"}`,
+        text: `Saved${validation.valid ? "" : " (flow has validation problems)"}`,
       });
     } catch (err) {
       setNotice({ kind: "error", text: `Could not save flow: ${err instanceof Error ? err.message : String(err)}` });
@@ -278,18 +282,18 @@ function FlowEditorInner() {
     <EditorContext.Provider value={ctx}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${colors.bgCard}` }}>
+          <button style={buttonBase} onClick={handleBack} disabled={running}>
+            ← Flows
+          </button>
           <strong style={{ fontSize: 15, marginRight: 4 }}>
             {meta.name || "Untitled"}
             {dirty ? <span title="Unsaved changes" style={{ color: colors.accent }}> •</span> : null}
           </strong>
           <span style={{ fontSize: 11, opacity: 0.55, marginRight: "auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {filePath ?? "not saved"}
+            {meta.id}
           </span>
-          <button style={buttonBase} onClick={newFlow} disabled={running}>New</button>
-          <button style={buttonBase} onClick={open} disabled={running}>Open…</button>
-          <button style={buttonBase} onClick={() => save(false)}>Save</button>
-          <button style={buttonBase} onClick={() => save(true)}>Save as…</button>
           <button style={buttonBase} onClick={autoLayout} disabled={running || nodes.length === 0}>Auto-layout</button>
+          <button style={buttonBase} onClick={save} disabled={running}>Save</button>
           {running ? (
             <button style={{ ...buttonBase, borderColor: STATUS_COLORS.running, color: STATUS_COLORS.running }} onClick={stopRun}>
               Stop
@@ -358,7 +362,11 @@ function FlowEditorInner() {
               <Controls />
               <MiniMap pannable zoomable style={{ background: colors.bgGrey }} nodeColor={(n) => STATUS_COLORS[ctx.steps[n.id]?.status ?? "pending"]} />
             </ReactFlow>
-            {nodes.length === 0 ? (
+            {loading ? (
+              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", opacity: 0.5 }}>
+                Loading flow…
+              </div>
+            ) : nodes.length === 0 ? (
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", opacity: 0.5 }}>
                 Drag agents here, then connect the right handle of one step to the left handle of the next.
               </div>

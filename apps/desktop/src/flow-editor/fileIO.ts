@@ -1,35 +1,72 @@
 /**
- * Save/open flow JSON. Uses the Electron bridge when available and falls back
- * to browser download/upload when the renderer runs outside Electron.
+ * CRUD storage for flow entities. Uses the Electron bridge when available and
+ * falls back to localStorage when the renderer runs outside Electron.
  */
+import type { FlowSummary } from "../../electron/api.js";
 
-export type SaveOutcome = { canceled: true } | { canceled: false; filePath?: string };
-export type OpenOutcome = { canceled: true } | { canceled: false; filePath?: string; content: string };
+export type { FlowSummary };
 
-export async function saveFlowJson(json: string, suggestedName: string, filePath?: string): Promise<SaveOutcome> {
-  if (window.agentlab) return window.agentlab.flows.save(json, { suggestedName, filePath });
+const LOCAL_PREFIX = "agentlab:flow:";
 
-  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${suggestedName}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  return { canceled: false };
+interface LocalRecord {
+  content: string;
+  updatedAt: string;
 }
 
-export async function openFlowJson(): Promise<OpenOutcome> {
-  if (window.agentlab) return window.agentlab.flows.open();
+const localKey = (id: string) => `${LOCAL_PREFIX}${id}`;
 
-  return new Promise((resolve) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "application/json,.json";
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      resolve(file ? { canceled: false, content: await file.text() } : { canceled: true });
-    };
-    input.oncancel = () => resolve({ canceled: true });
-    input.click();
-  });
+function readLocalRecord(id: string): LocalRecord | undefined {
+  const raw = localStorage.getItem(localKey(id));
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as LocalRecord;
+  } catch {
+    return undefined;
+  }
+}
+
+function readLocalSummaries(): FlowSummary[] {
+  const summaries: FlowSummary[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith(LOCAL_PREFIX)) continue;
+    const id = key.slice(LOCAL_PREFIX.length);
+    const record = readLocalRecord(id);
+    if (!record) continue;
+    try {
+      const parsed = JSON.parse(record.content);
+      summaries.push({
+        id: typeof parsed.id === "string" ? parsed.id : id,
+        name: typeof parsed.name === "string" ? parsed.name : id,
+        description: typeof parsed.description === "string" ? parsed.description : undefined,
+        updatedAt: record.updatedAt,
+      });
+    } catch {
+      // skip corrupt entry
+    }
+  }
+  return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export async function listFlows(): Promise<FlowSummary[]> {
+  if (window.agentlab) return window.agentlab.flows.list();
+  return readLocalSummaries();
+}
+
+export async function readFlow(id: string): Promise<string> {
+  if (window.agentlab) return window.agentlab.flows.read(id);
+  const record = readLocalRecord(id);
+  if (!record) throw new Error(`Flow "${id}" not found`);
+  return record.content;
+}
+
+export async function saveFlow(id: string, json: string): Promise<void> {
+  if (window.agentlab) return window.agentlab.flows.save(id, json);
+  const record: LocalRecord = { content: json, updatedAt: new Date().toISOString() };
+  localStorage.setItem(localKey(id), JSON.stringify(record));
+}
+
+export async function deleteFlow(id: string): Promise<void> {
+  if (window.agentlab) return window.agentlab.flows.delete(id);
+  localStorage.removeItem(localKey(id));
 }

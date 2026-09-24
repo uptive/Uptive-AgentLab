@@ -1,48 +1,64 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { readFile, writeFile } from "node:fs/promises";
+import { app, BrowserWindow, ipcMain } from "electron";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { IPC, type OpenFlowResult, type SaveFlowResult } from "./api.js";
+import { IPC, type FlowSummary } from "./api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
-const JSON_FILTERS = [{ name: "Flow definition", extensions: ["json"] }];
+function flowsDir(): string {
+  return path.join(app.getPath("userData"), "flows");
+}
 
-/** Paths the user explicitly picked via a dialog; only these may be overwritten silently. */
-const userSelectedPaths = new Set<string>();
+async function ensureFlowsDir(): Promise<string> {
+  const dir = flowsDir();
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
+
+function flowFilePath(id: string): string {
+  const safe = id.replace(/[^\w.-]+/g, "-") || "flow";
+  return path.join(flowsDir(), `${safe}.json`);
+}
 
 function registerIpc() {
-  ipcMain.handle(
-    IPC.saveFlow,
-    async (event, json: string, options: { suggestedName: string; filePath?: string }): Promise<SaveFlowResult> => {
-      let filePath = options.filePath && userSelectedPaths.has(options.filePath) ? options.filePath : undefined;
-      if (!filePath) {
-        const win = BrowserWindow.fromWebContents(event.sender);
-        const safeName = options.suggestedName.replace(/[^\w.-]+/g, "-") || "flow";
-        const dialogOptions = {
-          defaultPath: path.join(app.getPath("documents"), `${safeName}.json`),
-          filters: JSON_FILTERS,
-        };
-        const result = win ? await dialog.showSaveDialog(win, dialogOptions) : await dialog.showSaveDialog(dialogOptions);
-        if (result.canceled || !result.filePath) return { canceled: true };
-        filePath = result.filePath;
-        userSelectedPaths.add(filePath);
+  ipcMain.handle(IPC.listFlows, async (): Promise<FlowSummary[]> => {
+    const dir = await ensureFlowsDir();
+    const files = await readdir(dir);
+    const summaries: FlowSummary[] = [];
+    for (const file of files) {
+      if (!file.endsWith(".json")) continue;
+      const filePath = path.join(dir, file);
+      try {
+        const [content, stats] = await Promise.all([readFile(filePath, "utf8"), stat(filePath)]);
+        const parsed = JSON.parse(content);
+        summaries.push({
+          id: typeof parsed.id === "string" ? parsed.id : file.replace(/\.json$/, ""),
+          name: typeof parsed.name === "string" ? parsed.name : file,
+          description: typeof parsed.description === "string" ? parsed.description : undefined,
+          updatedAt: stats.mtime.toISOString(),
+        });
+      } catch {
+        // skip unreadable/corrupt files
       }
-      await writeFile(filePath, json, "utf8");
-      return { canceled: false, filePath };
-    },
-  );
+    }
+    summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return summaries;
+  });
 
-  ipcMain.handle(IPC.openFlow, async (event): Promise<OpenFlowResult> => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    const dialogOptions = { properties: ["openFile" as const], filters: JSON_FILTERS };
-    const result = win ? await dialog.showOpenDialog(win, dialogOptions) : await dialog.showOpenDialog(dialogOptions);
-    if (result.canceled || result.filePaths.length === 0) return { canceled: true };
-    const filePath = result.filePaths[0];
-    userSelectedPaths.add(filePath);
-    return { canceled: false, filePath, content: await readFile(filePath, "utf8") };
+  ipcMain.handle(IPC.readFlow, async (_event, id: string): Promise<string> => {
+    return readFile(flowFilePath(id), "utf8");
+  });
+
+  ipcMain.handle(IPC.saveFlow, async (_event, id: string, json: string): Promise<void> => {
+    await ensureFlowsDir();
+    await writeFile(flowFilePath(id), json, "utf8");
+  });
+
+  ipcMain.handle(IPC.deleteFlow, async (_event, id: string): Promise<void> => {
+    await rm(flowFilePath(id), { force: true });
   });
 }
 
