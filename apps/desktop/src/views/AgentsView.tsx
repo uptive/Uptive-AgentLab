@@ -478,17 +478,26 @@ export function AgentsView() {
         <div>
           <h1 style={{ ...titleStyle, fontSize: 26 }}>Agents</h1>
           <p style={{ margin: "4px 0 0", color: ads.textSecondary, fontSize: 14 }}>
-            {loading ? "\u00a0" : `${agents.length} ${agents.length === 1 ? "agent" : "agents"}`}
+            {loading && agents.length === 0 ? "\u00a0" : `${agents.length} ${agents.length === 1 ? "agent" : "agents"}`}
           </p>
         </div>
-        <button style={{ ...pillButton, padding: "10px 20px", fontSize: 15 }} onClick={openCreate}>
-          + New agent
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            style={{ ...ghostButton, padding: "10px 20px", fontSize: 15, opacity: loading ? 0.6 : 1 }}
+            onClick={() => void refresh()}
+            disabled={loading}
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+          <button style={{ ...pillButton, padding: "10px 20px", fontSize: 15 }} onClick={openCreate}>
+            + New agent
+          </button>
+        </div>
       </div>
 
       {error && !drawerOpen ? <ErrorBanner message={error} onDismiss={() => setError(undefined)} /> : null}
 
-      {loading ? (
+      {loading && agents.length === 0 ? (
         <p style={{ color: ads.textMuted }}>Loading agents…</p>
       ) : agents.length === 0 ? (
         <p style={{ color: ads.textMuted }}>No agents yet.</p>
