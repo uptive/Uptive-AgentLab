@@ -1,26 +1,242 @@
-import type { Run, TraceEvent } from "@agentlab/contracts";
+import type { Run, StepRun, TraceEvent } from "@agentlab/contracts";
+
+export const PERSISTED_STATE_VERSION = 1 as const;
+
+export interface PersistedState {
+  version: typeof PERSISTED_STATE_VERSION;
+  runs: Run[];
+  events: TraceEvent[];
+}
+
+export interface RunPersistenceAdapter {
+  load(): Promise<PersistedState | null>;
+  save(state: PersistedState): Promise<void>;
+}
+
+export type StoreListener = () => void;
 
 export interface TelemetryStore {
   recordEvent(event: TraceEvent): void;
   saveRun(run: Run): void;
   getRun(runId: string): Run | undefined;
   listRuns(): Run[];
+  listEvents(runId: string): TraceEvent[];
+  subscribe(listener: StoreListener): () => void;
+  hydrate(): Promise<void>;
 }
 
-const runs = new Map<string, Run>();
-const events: TraceEvent[] = [];
+export interface CreateTelemetryStoreOptions {
+  adapter?: RunPersistenceAdapter;
+  /** Coalescing window for disk writes. Defaults to 100ms. */
+  writeDebounceMs?: number;
+}
 
-export const store: TelemetryStore = {
-  recordEvent(event: TraceEvent): void {
+export function createTelemetryStore(options: CreateTelemetryStoreOptions = {}): TelemetryStore {
+  const { adapter, writeDebounceMs = 100 } = options;
+  const runs = new Map<string, Run>();
+  const events: TraceEvent[] = [];
+  const eventsByRunId = new Map<string, TraceEvent[]>();
+  const listeners = new Set<StoreListener>();
+
+  // React's useSyncExternalStore requires getSnapshot to return a stable
+  // reference between mutations, so we cache the array snapshots and only
+  // rebuild them when a mutation invalidates the relevant cache entry.
+  let runsSnapshot: Run[] | undefined;
+  const eventsSnapshotByRunId = new Map<string, TraceEvent[]>();
+
+  let hydratePromise: Promise<void> | undefined;
+  let dirty = false;
+  let writeTimer: ReturnType<typeof setTimeout> | undefined;
+  let inFlightWrite: Promise<void> | undefined;
+
+  function notify(): void {
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (err) {
+        console.error("Telemetry listener threw:", err);
+      }
+    }
+  }
+
+  function snapshot(): PersistedState {
+    return {
+      version: PERSISTED_STATE_VERSION,
+      runs: Array.from(runs.values()),
+      events: [...events],
+    };
+  }
+
+  async function flush(): Promise<void> {
+    if (!adapter || !dirty) return;
+    dirty = false;
+    const state = snapshot();
+    try {
+      inFlightWrite = adapter.save(state);
+      await inFlightWrite;
+    } catch (err) {
+      dirty = true;
+      console.error("Failed to persist telemetry state:", err);
+    } finally {
+      inFlightWrite = undefined;
+    }
+  }
+
+  function schedulePersist(): void {
+    if (!adapter) return;
+    dirty = true;
+    if (writeTimer) return;
+    writeTimer = setTimeout(() => {
+      writeTimer = undefined;
+      void flush();
+    }, writeDebounceMs);
+  }
+
+  function indexEvent(event: TraceEvent): void {
     events.push(event);
-  },
-  saveRun(run: Run): void {
-    runs.set(run.id, run);
-  },
-  getRun(runId: string): Run | undefined {
-    return runs.get(runId);
-  },
-  listRuns(): Run[] {
-    return Array.from(runs.values());
-  },
-};
+    const bucket = eventsByRunId.get(event.runId);
+    if (bucket) {
+      bucket.push(event);
+    } else {
+      eventsByRunId.set(event.runId, [event]);
+    }
+    eventsSnapshotByRunId.delete(event.runId);
+  }
+
+  return {
+    recordEvent(event: TraceEvent): void {
+      indexEvent(event);
+      schedulePersist();
+      notify();
+    },
+    saveRun(run: Run): void {
+      runs.set(run.id, run);
+      runsSnapshot = undefined;
+      schedulePersist();
+      notify();
+    },
+    getRun(runId: string): Run | undefined {
+      return runs.get(runId);
+    },
+    listRuns(): Run[] {
+      if (!runsSnapshot) runsSnapshot = Array.from(runs.values());
+      return runsSnapshot;
+    },
+    listEvents(runId: string): TraceEvent[] {
+      let cached = eventsSnapshotByRunId.get(runId);
+      if (!cached) {
+        cached = eventsByRunId.get(runId)?.slice() ?? [];
+        eventsSnapshotByRunId.set(runId, cached);
+      }
+      return cached;
+    },
+    subscribe(listener: StoreListener): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    hydrate(): Promise<void> {
+      if (hydratePromise) return hydratePromise;
+      if (!adapter) {
+        hydratePromise = Promise.resolve();
+        return hydratePromise;
+      }
+      hydratePromise = (async () => {
+        const loaded = await adapter.load();
+        if (!loaded) return;
+        if (loaded.version !== PERSISTED_STATE_VERSION) {
+          console.warn(
+            `Ignoring persisted telemetry with unsupported version ${String(loaded.version)}`,
+          );
+          return;
+        }
+        for (const run of loaded.runs) runs.set(run.id, run);
+        for (const event of loaded.events) indexEvent(event);
+        runsSnapshot = undefined;
+        notify();
+      })();
+      return hydratePromise;
+    },
+  };
+}
+
+let sharedStore: TelemetryStore | undefined;
+
+/** Returns the process-wide store, creating an in-memory one on first use. */
+export function getTelemetryStore(): TelemetryStore {
+  if (!sharedStore) sharedStore = createTelemetryStore();
+  return sharedStore;
+}
+
+/**
+ * Replaces the process-wide store with one backed by the given adapter. Call once
+ * at app bootstrap (before any group's runtime records events).
+ */
+export function initTelemetryStore(options: CreateTelemetryStoreOptions = {}): TelemetryStore {
+  sharedStore = createTelemetryStore(options);
+  return sharedStore;
+}
+
+export interface RunSummary {
+  status: Run["status"];
+  durationMs?: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
+  agentIds: string[];
+  modelCallCount: number;
+  toolCallCount: number;
+}
+
+/**
+ * Aggregates tokens, cost and call counts across a run. Model/tool call counts
+ * are derived from trace events when available and fall back to per-step data.
+ */
+export function summarizeRun(run: Run, events?: TraceEvent[]): RunSummary {
+  const durationMs =
+    run.completedAt !== undefined
+      ? new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()
+      : undefined;
+
+  const summary: RunSummary = {
+    status: run.status,
+    durationMs,
+    inputTokens: run.totalUsage?.inputTokens ?? 0,
+    outputTokens: run.totalUsage?.outputTokens ?? 0,
+    estimatedCostUsd: run.totalUsage?.estimatedCostUsd ?? 0,
+    agentIds: [],
+    modelCallCount: 0,
+    toolCallCount: 0,
+  };
+
+  const seenAgents = new Set<string>();
+  for (const step of run.steps) {
+    seenAgents.add(step.agentId);
+    if (!run.totalUsage && step.usage) {
+      summary.inputTokens += step.usage.inputTokens;
+      summary.outputTokens += step.usage.outputTokens;
+      summary.estimatedCostUsd += step.usage.estimatedCostUsd;
+    }
+  }
+  summary.agentIds = Array.from(seenAgents);
+
+  const runEvents = events?.filter((event) => event.runId === run.id);
+  if (runEvents && runEvents.length > 0) {
+    for (const event of runEvents) {
+      if (event.type === "model_call") summary.modelCallCount += 1;
+      else if (event.type === "tool_call") summary.toolCallCount += 1;
+    }
+  } else {
+    for (const step of run.steps) {
+      summary.toolCallCount += step.toolCalls.length;
+      summary.modelCallCount += step.usage ? 1 : 0;
+    }
+  }
+
+  return summary;
+}
+
+export function getStepRun(run: Run, stepRunId: string): StepRun | undefined {
+  return run.steps.find((step) => step.id === stepRunId);
+}

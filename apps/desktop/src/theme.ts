@@ -4,6 +4,9 @@ export const colors = {
   bgBlack: "#202123",
   bgGrey: "#313131",
   bgCard: "#505050",
+  warning: "#F5B942",
+  danger: "#F26D6D",
+  muted: "#8A8D91",
 } as const;
 
 export type ThemeColor = keyof typeof colors;
