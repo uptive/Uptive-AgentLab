@@ -10,8 +10,9 @@ export default defineConfig({
         entry: "electron/main.ts",
         vite: {
           build: {
-            // Node-only driver with optional native deps; load it from node_modules at runtime.
-            rollupOptions: { external: ["mongodb"] },
+            // Node-only packages loaded from node_modules at runtime: the MongoDB driver has optional
+            // native deps, and the Agent SDK drives a native Claude Code binary.
+            rollupOptions: { external: ["mongodb", "@anthropic-ai/claude-agent-sdk"] },
           },
         },
       },

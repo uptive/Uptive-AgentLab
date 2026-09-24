@@ -14,15 +14,16 @@ The user describes what they want the agent to achieve. Map that into a complete
 - systemInstructions: the full system prompt the agent runs with. Be specific and thorough: goal, step-by-step
   approach, constraints, edge cases, and the exact output format. This is the most important field.
 - model: pick from the allowed list; stronger models for complex reasoning, faster ones for simple transforms.
-- temperature: 0-1; low for deterministic/extraction work, higher for creative work.
-- maxTokens: a sensible output budget for one response.
-- tools: tools the agent would need (e.g. web_search, fetch_url, read_file). Use kind "mcp" for external MCP
-  servers and "function" for local functions. Empty list if none are needed.
+- effort: how hard the model thinks: "low" for simple transforms, "medium" for most work, "high" or above for
+  hard reasoning.
+- tools: only the tools the agent really needs, from the allowed list (Read/Glob/Grep read files, WebSearch and
+  WebFetch use the web, Write/Edit/Bash change the computer, so avoid them unless the task requires it).
+  Empty list if none are needed.
 - inputSchema / outputSchema: JSON Schemas describing what the agent receives from the previous step and what it
   returns to the next one.
 Write in the same language as the user's description.`;
 
-function draftSchema(models: string[]) {
+function draftSchema(models: string[], tools: string[]) {
   return {
     type: "object",
     properties: {
@@ -31,16 +32,8 @@ function draftSchema(models: string[]) {
       role: { type: "string" },
       systemInstructions: { type: "string" },
       model: { type: "string", enum: models },
-      temperature: { type: "number", minimum: 0, maximum: 1 },
-      maxTokens: { type: "integer", minimum: 1 },
-      tools: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: { name: { type: "string" }, kind: { type: "string", enum: ["mcp", "function"] } },
-          required: ["name", "kind"],
-        },
-      },
+      effort: { type: "string", enum: ["low", "medium", "high", "xhigh", "max"] },
+      tools: { type: "array", items: { type: "string", enum: tools } },
       inputSchema: { type: "object" },
       outputSchema: { type: "object" },
     },
@@ -50,8 +43,7 @@ function draftSchema(models: string[]) {
       "role",
       "systemInstructions",
       "model",
-      "temperature",
-      "maxTokens",
+      "effort",
       "tools",
       "inputSchema",
       "outputSchema",
@@ -61,7 +53,7 @@ function draftSchema(models: string[]) {
 
 /** Runs the `claude` CLI headless and returns an agent definition mapped from a free-text description. */
 /** `roles` are the existing role names; the draft reuses one when it fits. */
-export function generateAgentDraft({ description, models }: AgentDraftRequest, roles: string[]): Promise<AgentDraft> {
+export function generateAgentDraft({ description, models, tools }: AgentDraftRequest, roles: string[], claudeBin?: string): Promise<AgentDraft> {
   if (!description.trim()) return Promise.reject(new Error("Describe what the agent should achieve first."));
 
   // Isolated run: no tools, MCP servers, settings, skills or sessions, so only our prompt goes to the model.
@@ -69,7 +61,7 @@ export function generateAgentDraft({ description, models }: AgentDraftRequest, r
     "-p",
     "--model", DRAFT_MODEL,
     "--output-format", "json",
-    "--json-schema", JSON.stringify(draftSchema(models)),
+    "--json-schema", JSON.stringify(draftSchema(models, tools)),
     "--system-prompt", SYSTEM_PROMPT,
     "--tools", "",
     "--strict-mcp-config",
@@ -80,7 +72,8 @@ export function generateAgentDraft({ description, models }: AgentDraftRequest, r
 
   return new Promise((resolve, reject) => {
     const child = execFile(
-      process.env.CLAUDE_BIN || "claude",
+      // The Claude Code binary bundled with the Agent SDK, so no separate install is needed.
+      process.env.CLAUDE_BIN || claudeBin || "claude",
       args,
       { cwd: tmpdir(), timeout: TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
       (error, stdout, stderr) => {

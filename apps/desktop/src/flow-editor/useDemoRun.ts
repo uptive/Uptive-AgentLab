@@ -3,7 +3,8 @@ import type { FlowDefinition } from "@agentlab/contracts";
 import { computeSchedule, hashedDuration, type FlowSchedule } from "@agentlab/flow-engine";
 import { edgeId } from "./graphMapping.js";
 
-export type DemoNodeState = "idle" | "waiting" | "running" | "done";
+/** "failed" is only produced by real runs (see RunGraph), never by the simulated demo. */
+export type DemoNodeState = "idle" | "waiting" | "running" | "done" | "failed";
 
 export interface DemoNodeFrame {
   state: DemoNodeState;
@@ -12,6 +13,8 @@ export interface DemoNodeFrame {
   /** Dependencies that have handed off so far / total dependencies. */
   arrived: number;
   total: number;
+  /** Optional one-line caption, e.g. latency and tokens of a finished step. */
+  detail?: string;
 }
 
 export interface DemoFrame {

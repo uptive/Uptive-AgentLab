@@ -1,8 +1,30 @@
 import type { AgentDefinition } from "@agentlab/contracts";
 
+const reviewOutputSchema = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          severity: { type: "string", enum: ["high", "medium", "low"] },
+          location: { type: "string" },
+          issue: { type: "string" },
+          suggestion: { type: "string" },
+        },
+        required: ["severity", "issue", "suggestion"],
+      },
+    },
+  },
+  required: ["summary", "findings"],
+};
+
 /**
- * Demo agents used by the workshop's "Review PR #42" scenario. Group 1 owns the
- * real registry; this is a placeholder so other groups can build against it.
+ * Built-in agents for the workshop's "Review PR #42" scenario. They are always available to flows;
+ * agents saved in the app are looked up first. The Planner deliberately uses a strong model so the
+ * Optimize view has a model-selection recommendation to make.
  */
 export const demoAgents: AgentDefinition[] = [
   {
@@ -10,36 +32,75 @@ export const demoAgents: AgentDefinition[] = [
     name: "Planner",
     role: "planner",
     description: "Breaks the task down into a review plan",
-    systemInstructions: "Read the PR description and produce a short, structured review plan.",
-    model: "gpt-4o-mini",
+    status: "active",
+    systemInstructions:
+      "You plan code reviews. Read the pull request (title, description and diff) and produce a short review plan: what the change does, the risky areas, and what the code reviewer and the security reviewer should each focus on.",
+    model: "claude-opus-5",
     tools: [],
+    outputSchema: {
+      type: "object",
+      properties: {
+        changeSummary: { type: "string" },
+        riskAreas: { type: "array", items: { type: "string" } },
+        codeReviewFocus: { type: "array", items: { type: "string" } },
+        securityReviewFocus: { type: "array", items: { type: "string" } },
+      },
+      required: ["changeSummary", "riskAreas", "codeReviewFocus", "securityReviewFocus"],
+    },
+    limits: { maxCostUsd: 1 },
   },
   {
     id: "code-reviewer",
     name: "Code Reviewer",
     role: "reviewer",
     description: "Reviews code for bugs and regressions",
-    systemInstructions: "Look for bugs, regressions and unclear logic in the diff.",
-    model: "gpt-4o",
-    tools: [{ id: "read_file", name: "read_file", kind: "function" }],
+    status: "active",
+    systemInstructions:
+      "You review code changes for bugs, regressions and unclear logic, following the plan you are given. If a repository folder is available, read the surrounding code to confirm a finding before reporting it. Report only real problems, most severe first.",
+    model: "claude-sonnet-5",
+    tools: [
+      { id: "Read", name: "Read", kind: "builtin" },
+      { id: "Grep", name: "Grep", kind: "builtin" },
+      { id: "Glob", name: "Glob", kind: "builtin" },
+    ],
+    outputSchema: reviewOutputSchema,
+    limits: { maxCostUsd: 1 },
   },
   {
     id: "security-reviewer",
     name: "Security Reviewer",
     role: "reviewer",
     description: "Reviews code for security risks",
-    systemInstructions: "Look for security risks such as injection, secrets and unsafe input handling.",
-    model: "gpt-4o",
-    tools: [{ id: "grep_search", name: "grep_search", kind: "function" }],
+    status: "active",
+    systemInstructions:
+      "You review code changes for security risks such as injection, leaked secrets, missing authorization and unsafe input handling, following the plan you are given. Report only real risks, most severe first.",
+    model: "claude-sonnet-5",
+    tools: [
+      { id: "Read", name: "Read", kind: "builtin" },
+      { id: "Grep", name: "Grep", kind: "builtin" },
+    ],
+    outputSchema: reviewOutputSchema,
+    limits: { maxCostUsd: 1 },
   },
   {
     id: "final-validator",
     name: "Final Validator",
     role: "validator",
     description: "Combines both reviews into a final verdict",
-    systemInstructions: "Combine the code and security review into a single pass/fail verdict with reasons.",
-    model: "gpt-4o-mini",
+    status: "active",
+    systemInstructions:
+      "You receive a code review and a security review of the same change. Combine them into one verdict: approve if there are no high-severity findings, otherwise request changes. List the reasons.",
+    model: "claude-sonnet-5",
     tools: [],
+    outputSchema: {
+      type: "object",
+      properties: {
+        verdict: { type: "string", enum: ["approve", "request-changes"] },
+        reasons: { type: "array", items: { type: "string" } },
+      },
+      required: ["verdict", "reasons"],
+    },
+    limits: { maxCostUsd: 0.5 },
   },
 ];
 

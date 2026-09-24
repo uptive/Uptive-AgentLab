@@ -1,6 +1,18 @@
 /** Shared contract for the preload bridge (`window.agentlab`). Types only + channel names. */
 
-import type { AgentDefinition, AgentInput, AgentRuntime, FlowStore, Run, TraceEvent } from "@agentlab/contracts";
+import type {
+  AgentDefinition,
+  AgentInput,
+  AgentRuntime,
+  FlowDefinition,
+  FlowStore,
+  McpServerDefinition,
+  McpServerInput,
+  Run,
+  SkillDefinition,
+  TraceEvent,
+} from "@agentlab/contracts";
+import type { ClaudeAuthStatus, McpTestResult } from "@agentlab/agent-runtime/claude";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import type { JsonRequest } from "@agentlab/optimization";
 
@@ -24,6 +36,26 @@ export interface ProjectsState {
   flowsDirectory: string;
   flows: ProjectEntry[];
 }
+
+export interface StartRunRequest {
+  flow: FlowDefinition;
+  input: unknown;
+  /** A folder agents may read (e.g. the repository a review flow looks at). */
+  folder?: string;
+}
+
+/** A server in the app's MCP library (see McpServerEntry for servers listed from other apps' configs). */
+export interface LibraryMcpServer extends McpServerDefinition {
+  /** Whether the secret this server references is stored on this computer. */
+  hasSecret: boolean;
+}
+
+export interface ImportResult {
+  imported: string[];
+  skipped: { name: string; reason: string }[];
+}
+
+export type { ClaudeAuthStatus, McpTestResult };
 
 /** Where an agent is stored: a JSON file in the git-ignored local folder, or MongoDB. */
 export type AgentSource = "local" | "database";
@@ -60,6 +92,8 @@ export interface AgentDraftRequest {
   description: string;
   /** Model ids the draft may pick from. */
   models: string[];
+  /** Tool names the draft may pick from (built-in and function tools). */
+  tools: string[];
 }
 
 /** Agent fields proposed by Claude from a free-text description; reviewed in the form before applying. */
@@ -69,9 +103,9 @@ export interface AgentDraft {
   role: string;
   systemInstructions: string;
   model: string;
-  temperature: number;
-  maxTokens: number;
-  tools: { name: string; kind: "mcp" | "function" }[];
+  effort: "low" | "medium" | "high" | "xhigh" | "max";
+  /** Names from AgentDraftRequest.tools. */
+  tools: string[];
   inputSchema: unknown;
   outputSchema: unknown;
 }
@@ -222,6 +256,38 @@ export interface AgentLabApi {
     load(): Promise<PersistedState | null>;
     save(state: PersistedState): Promise<void>;
   };
+  /** Real flow runs, executed by the Claude runtime in the main process. */
+  runs: {
+    /** Resolves as soon as the run has started. Progress arrives through onUpdate/onEvent. */
+    start(request: StartRunRequest): Promise<{ runId: string }>;
+    cancel(runId: string): Promise<void>;
+    /** Subscribes to run snapshots; returns an unsubscribe function. */
+    onUpdate(listener: (run: Run) => void): () => void;
+    onEvent(listener: (event: TraceEvent) => void): () => void;
+    /** Opens a folder picker; undefined when cancelled. */
+    pickFolder(): Promise<string | undefined>;
+  };
+  claude: {
+    authStatus(refresh?: boolean): Promise<ClaudeAuthStatus>;
+    /** Agents that are always available to flows, in addition to saved agents. */
+    builtinAgents(): Promise<AgentDefinition[]>;
+  };
+  skills: {
+    list(): Promise<SkillDefinition[]>;
+    save(skill: SkillDefinition): Promise<SkillDefinition>;
+    delete(name: string): Promise<boolean>;
+    reveal(name: string): Promise<void>;
+    /** Lets the user pick skill folders (each with a SKILL.md) and copies them into the library. */
+    import(): Promise<ImportResult>;
+  };
+  mcpServers: {
+    list(): Promise<LibraryMcpServer[]>;
+    /** `secret`: a new value to store, null to remove the stored one, undefined to keep it. */
+    save(input: McpServerInput, secret?: string | null): Promise<LibraryMcpServer>;
+    delete(id: string): Promise<boolean>;
+    test(id: string): Promise<McpTestResult>;
+    importClaudeDesktop(): Promise<ImportResult>;
+  };
   mcp: {
     /** MCP servers configured for Claude Desktop, Claude Code, plugins, this repo and Cursor. Read-only. */
     list(): Promise<McpSource[]>;
@@ -245,6 +311,23 @@ export const IPC = {
   saveCloudFlow: "cloudFlows:save",
   deleteCloudFlow: "cloudFlows:delete",
   generateJson: "optimization:generate-json",
+  startRun: "runs:start",
+  cancelRun: "runs:cancel",
+  runUpdate: "runs:update",
+  runEvent: "runs:event",
+  pickFolder: "runs:pick-folder",
+  authStatus: "claude:auth-status",
+  builtinAgents: "claude:builtin-agents",
+  listSkills: "skills:list",
+  saveSkill: "skills:save",
+  deleteSkill: "skills:delete",
+  revealSkill: "skills:reveal",
+  importSkills: "skills:import",
+  listMcpServers: "mcpServers:list",
+  saveMcpServer: "mcpServers:save",
+  deleteMcpServer: "mcpServers:delete",
+  testMcpServer: "mcpServers:test",
+  importClaudeDesktop: "mcpServers:import-claude-desktop",
   listMcp: "mcp:list",
   listTools: "tools:list",
   refreshTools: "tools:refresh",

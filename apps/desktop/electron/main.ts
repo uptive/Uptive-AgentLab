@@ -38,12 +38,18 @@ import {
   type ToolRunRequest,
 } from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
+import { claudeBinaryPath, registerAgentRunIpc } from "./agentRuns.js";
 import { LocalToolRegistry } from "./localTools.js";
 import { listMcpSources } from "./mcpConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+
+// Opt-in DevTools protocol port for driving the app from scripts in development.
+if (process.env.AGENTLAB_DEBUG_PORT && !app.isPackaged) {
+  app.commandLine.appendSwitch("remote-debugging-port", process.env.AGENTLAB_DEBUG_PORT);
+}
 
 // Minimal KEY=VALUE parser. process.loadEnvFile() crashes Electron 33's main process (SIGTRAP).
 function loadEnvFile(envPath: string) {
@@ -331,8 +337,19 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
     return tag("database")(promoted);
   });
   // Roles are read here rather than passed from the renderer, so the draft always sees the current list.
-  ipcMain.handle("agents:draft", async (_e, request: AgentDraftRequest) => generateAgentDraft(request, await listRoles()));
+  ipcMain.handle("agents:draft", async (_e, request: AgentDraftRequest) => generateAgentDraft(request, await listRoles(), claudeBinaryPath()));
   ipcMain.handle("roles:list", () => listRoles());
+
+  // Real flow runs plus the skill and MCP libraries. Library data sits in data/ in development
+  // (so it can be committed) and in the app's user data folder when packaged.
+  registerAgentRunIpc({
+    // Same lookup as the agent IPC: the local folder first, then MongoDB.
+    getAgent: async (id) => {
+      const [store] = await agentStoreFor(id);
+      return store.get(id);
+    },
+    dataDir: app.isPackaged ? app.getPath("userData") : path.resolve(__dirname, "../../../data"),
+  });
 
   ipcMain.handle(IPC.listMcp, () =>
     listMcpSources({ appDataDir: app.getPath("appData"), repoRoot: path.resolve(__dirname, "../../..") }),

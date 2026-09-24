@@ -11,7 +11,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "planner",
     description: "Breaks the task into a plan and assigns focus areas.",
     systemInstructions: "You break a task into concrete steps for downstream reviewers.",
-    model: "gpt-4o-mini",
+    model: "claude-haiku-4-5",
     tools: [],
   },
   {
@@ -20,7 +20,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "reviewer",
     description: "Looks for bugs and regression risks.",
     systemInstructions: "Review the code for bugs, readability and regression risks.",
-    model: "gpt-4o",
+    model: "claude-sonnet-5",
     tools: [],
   },
   {
@@ -29,7 +29,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "reviewer",
     description: "Looks for security vulnerabilities.",
     systemInstructions: "Review the code for security vulnerabilities and unsafe patterns.",
-    model: "gpt-4o",
+    model: "claude-sonnet-5",
     tools: [],
   },
   {
@@ -38,7 +38,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "researcher",
     description: "Gathers background context.",
     systemInstructions: "Collect relevant background information for the task.",
-    model: "gpt-4o-mini",
+    model: "claude-haiku-4-5",
     tools: [],
   },
   {
@@ -47,7 +47,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "writer",
     description: "Condenses inputs into a short summary.",
     systemInstructions: "Summarize the provided material concisely.",
-    model: "gpt-4o-mini",
+    model: "claude-haiku-4-5",
     tools: [],
   },
   {
@@ -56,7 +56,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "validator",
     description: "Merges all findings and produces a verdict.",
     systemInstructions: "Merge all reviewer findings and produce a final verdict.",
-    model: "gpt-4o",
+    model: "claude-sonnet-5",
     tools: [],
   },
 ];

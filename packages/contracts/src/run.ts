@@ -1,5 +1,6 @@
 import type { Usage } from "./usage.js";
-import type { ToolCall } from "./agent.js";
+import type { AgentDefinition, ToolCall } from "./agent.js";
+import type { FlowDefinition } from "./flow.js";
 
 export type StepStatus = "pending" | "running" | "completed" | "failed";
 
@@ -28,7 +29,20 @@ export interface Run {
   completedAt?: string;
   steps: StepRun[];
   totalUsage?: Usage;
+  /**
+   * Snapshots of the flow and agents as they were when the run executed, so a run stays
+   * understandable (and analyzable, and rerunnable) after the flow or its agents are edited,
+   * and so graphs can be drawn for flows that aren't in a shared registry.
+   */
+  flow?: FlowDefinition;
+  agents?: AgentDefinition[];
+  /** The input the run was started with, so it can be rerun as-is. */
+  input?: unknown;
+  /** What paid for the model calls: a claude.ai subscription login, or an API key. */
+  authSource?: AuthSource;
 }
+
+export type AuthSource = "subscription" | "api-key" | "unknown";
 
 export type TraceEventType =
   | "agent_start"
