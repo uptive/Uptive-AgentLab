@@ -125,7 +125,7 @@ describe("createClaudeAgentRuntime", () => {
       systemPrompt: "Review things.",
       tools: ["Read"],
       permissionMode: "dontAsk",
-      settingSources: ["project"],
+      settingSources: [],
       strictMcpConfig: true,
       persistSession: false,
     });
@@ -134,6 +134,41 @@ describe("createClaudeAgentRuntime", () => {
     expect(seen.options?.env).toMatchObject({ PATH: "/bin", CLAUDE_CODE_OAUTH_TOKEN: "tok" });
     expect(seen.options?.env).not.toHaveProperty("CLAUDECODE");
     expect(seen.options?.env).not.toHaveProperty("CLAUDE_CODE_SESSION_ID");
+  });
+
+  it("streams thinking, text and tool input, and traces thinking", async () => {
+    const ev = (event: unknown) => ({ type: "stream_event", parent_tool_use_id: null, event }) as unknown as SDKMessage;
+    const chunks: unknown[] = [];
+    const { runtime, events, seen } = await setup(
+      [
+        ev({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }),
+        ev({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Hmm, " } }),
+        ev({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "read it." } }),
+        ev({ type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "t9", name: "Read", input: {} } }),
+        ev({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"file_path":' } }),
+        assistant("m1", [{ type: "thinking", thinking: "Hmm, read it." }, { type: "tool_use", name: "Read" }]),
+        success(),
+      ],
+      { onStream: (c) => chunks.push(c) },
+    );
+    await runtime.run({ ...agent, tools: [] }, "x", context);
+
+    expect(seen.options).toMatchObject({ includePartialMessages: true, thinking: { type: "adaptive", display: "summarized" } });
+    expect(chunks).toEqual([
+      { runId: "run-1", stepRunId: "step-1", type: "block", block: "thinking" },
+      { runId: "run-1", stepRunId: "step-1", type: "delta", text: "Hmm, " },
+      { runId: "run-1", stepRunId: "step-1", type: "delta", text: "read it." },
+      { runId: "run-1", stepRunId: "step-1", type: "block", block: "tool_use", toolName: "Read", toolUseId: "t9" },
+      { runId: "run-1", stepRunId: "step-1", type: "delta", text: '{"file_path":' },
+      { runId: "run-1", stepRunId: "step-1", type: "usage", inputTokens: 100, outputTokens: 20 },
+    ]);
+    expect(events.find((e) => e.type === "model_call")?.data).toMatchObject({ thinking: "Hmm, read it." });
+  });
+
+  it("does not ask for adaptive thinking on models without it", async () => {
+    const { runtime, seen } = await setup([success()]);
+    await runtime.run({ ...agent, tools: [], model: "claude-haiku-4-5" }, "x", context);
+    expect(seen.options?.thinking).toBeUndefined();
   });
 
   it("returns structured output when the agent has an output schema", async () => {
@@ -145,15 +180,18 @@ describe("createClaudeAgentRuntime", () => {
     expect(seen.prompt).toBe("hi");
   });
 
-  it("copies the agent's skills into the step workspace and enables only those", async () => {
+  it("copies the agent's skills into a plugin in the step workspace and enables only those", async () => {
     const { runtime, skills, root, seen } = await setup([success()]);
     await skills.save({ name: "tone-of-voice", description: "Use when writing copy.", instructions: "Be friendly." });
     await runtime.run({ ...agent, tools: [], skills: ["tone-of-voice"] }, "hi", context);
-    const copied = path.join(root, "workspaces", "run-1", "step-1", ".claude", "skills", "tone-of-voice", "SKILL.md");
-    expect(await readFile(copied, "utf8")).toContain("Be friendly.");
-    expect(seen.options?.skills).toEqual(["tone-of-voice"]);
+    const plugin = path.join(root, "workspaces", "run-1", "step-1", ".agentlab-skills");
+    expect(await readFile(path.join(plugin, "skills", "tone-of-voice", "SKILL.md"), "utf8")).toContain("Be friendly.");
+    expect(JSON.parse(await readFile(path.join(plugin, ".claude-plugin", "plugin.json"), "utf8")).name).toBe("agentlab-skills");
+    expect(seen.options?.skills).toEqual(["agentlab-skills:tone-of-voice"]);
+    expect(seen.options?.plugins).toEqual([{ type: "local", path: plugin, skipMcpDiscovery: true }]);
     expect(seen.options?.tools).toEqual(["Skill"]);
-    expect(seen.options?.cwd).toBe(path.dirname(path.dirname(path.dirname(path.dirname(copied)))));
+    expect(seen.options?.settingSources).toEqual([]);
+    expect(seen.options?.cwd).toBe(path.dirname(plugin));
   });
 
   it("fails clearly for a missing skill, MCP server or secret", async () => {

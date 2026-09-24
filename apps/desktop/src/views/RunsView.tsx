@@ -8,7 +8,9 @@ import { useCatalog, type Catalog } from "../runs/catalog.js";
 import { formatMs, formatRelative, formatUsd, stepLatencyMs } from "../runs/format.js";
 import { RunGraph } from "../runs/RunGraph.js";
 import { singleAgentFlow, startRun, stopRun } from "../runs/runLauncher.js";
-import { canRunForReal, connectLiveRuns } from "../liveRuns.js";
+import { buildActivity, canRunForReal, connectLiveRuns, useLiveStep } from "../liveRuns.js";
+import { ActivityView } from "../runs/ActivityView.js";
+import { JsonView } from "../runs/JsonView.js";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
   pending: theme.statusDraft,
@@ -50,27 +52,6 @@ function StatusBadge({ status }: { status: RunStatus }) {
     >
       {status}
     </span>
-  );
-}
-
-function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre
-      style={{
-        background: theme.codeBg,
-        border: `1px solid ${theme.border}`,
-        borderRadius: 6,
-        padding: 10,
-        fontSize: 12,
-        overflow: "auto",
-        maxHeight: 260,
-        margin: 0,
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-      }}
-    >
-      {value === undefined ? "—" : JSON.stringify(value, null, 2)}
-    </pre>
   );
 }
 
@@ -141,6 +122,36 @@ function resolveRunInput(run: Run, events: TraceEvent[]): unknown {
   return flowStart?.input ?? run.steps[0]?.input;
 }
 
+/** The step's result, front and centre: text as text, structured output as expanded JSON. */
+function FinalAnswer({ step }: { step: StepRun }) {
+  const done = step.status === "completed";
+  const output = step.output;
+  return (
+    <div
+      style={{
+        marginTop: 16,
+        border: `1px solid ${done ? theme.statusActive : theme.border}`,
+        borderRadius: 8,
+        padding: 12,
+        background: theme.surface,
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: done ? theme.statusActive : theme.textMuted, marginBottom: 8 }}>
+        Final answer
+      </div>
+      {step.status === "running" ? (
+        <div style={{ fontSize: 13, color: theme.textMuted }}>The agent is still working. Its answer appears here when it finishes; follow along below.</div>
+      ) : step.status === "failed" ? (
+        <div style={{ fontSize: 13, color: theme.errorText }}>No answer: {step.error ?? "the step failed."}</div>
+      ) : typeof output === "string" ? (
+        <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.6, color: theme.text }}>{output}</div>
+      ) : (
+        <JsonView value={output} openDepth={3} maxHeight={520} />
+      )}
+    </div>
+  );
+}
+
 function StepPanel({
   step,
   agent,
@@ -158,6 +169,23 @@ function StepPanel({
 }) {
   const usage = step.usage;
   const latencyMs = usage?.latencyMs ?? stepLatencyMs(step, now);
+  const store = getTelemetryStore();
+  const events = useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => store.listEvents(step.runId),
+  );
+  const live = useLiveStep(step.id);
+  const running = step.status === "running";
+  const activity = buildActivity(step.id, events, live);
+  // Final usage once the step is done; while it runs, the token counts streamed so far.
+  const inputTokens = usage?.inputTokens ?? live?.inputTokens;
+  const outputTokens = usage?.outputTokens ?? live?.outputTokens;
+  const [showInput, setShowInput] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
+  const counts = {
+    thinking: activity.filter((b) => b.kind === "thinking").length,
+    tools: activity.filter((b) => b.kind === "tool_use").length,
+  };
 
   return (
     <div>
@@ -183,8 +211,8 @@ function StepPanel({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
         <Metric label={step.status === "running" ? "Latency (so far)" : "Latency"} value={formatMs(latencyMs)} size={16} />
         <Metric label="Cost" value={usage ? formatUsd(usage.estimatedCostUsd) : "-"} size={16} />
-        <Metric label="Input tokens" value={usage ? usage.inputTokens.toLocaleString() : "-"} size={16} />
-        <Metric label="Output tokens" value={usage ? usage.outputTokens.toLocaleString() : "-"} size={16} />
+        <Metric label={running ? "Input tokens (so far)" : "Input tokens"} value={inputTokens !== undefined ? inputTokens.toLocaleString() : "-"} size={16} />
+        <Metric label={running ? "Output tokens (so far)" : "Output tokens"} value={outputTokens !== undefined ? outputTokens.toLocaleString() : "-"} size={16} />
       </div>
       {step.startedAt ? (
         <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 8 }}>
@@ -214,18 +242,51 @@ function StepPanel({
         </p>
       ) : (
         <>
-          <SectionLabel>Input</SectionLabel>
-          <JsonBlock value={step.input} />
-          <SectionLabel>Output</SectionLabel>
-          {step.status === "running" ? (
-            <div style={{ fontSize: 12, color: theme.textMuted }}>Agent is still running…</div>
-          ) : (
-            <JsonBlock value={step.output} />
-          )}
+          <FinalAnswer step={step} />
+
+          {running ? (
+            <>
+              <SectionLabel>Live activity</SectionLabel>
+              <ActivityView blocks={activity} running />
+            </>
+          ) : activity.length > 0 ? (
+            <div style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={() => setShowActivity((v) => !v)}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, fontWeight: 600, color: theme.textSecondary }}
+              >
+                {showActivity ? "▾" : "▸"} What the agent did
+                <span style={{ fontWeight: 400, color: theme.textMuted }}>
+                  {" "}
+                  · {counts.thinking} thinking · {counts.tools} tool {counts.tools === 1 ? "call" : "calls"}
+                </span>
+              </button>
+              {showActivity ? (
+                <div style={{ marginTop: 8 }}>
+                  <ActivityView blocks={activity} running={false} />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => setShowInput((v) => !v)}
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, fontWeight: 600, color: theme.textSecondary }}
+            >
+              {showInput ? "▾" : "▸"} Input
+            </button>
+            {showInput ? (
+              <div style={{ marginTop: 6 }}>
+                <JsonView value={step.input} />
+              </div>
+            ) : null}
+          </div>
         </>
       )}
 
-      {step.toolCalls.length > 0 ? (
+      {step.toolCalls.length > 0 && activity.length === 0 ? (
         <>
           <SectionLabel>Tool calls</SectionLabel>
           {step.toolCalls.map((call, index) => (
@@ -235,8 +296,8 @@ function StepPanel({
                 {formatMs(new Date(call.completedAt).getTime() - new Date(call.startedAt).getTime())})
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 8 }}>
-                <JsonBlock value={call.input} />
-                <JsonBlock value={call.output} />
+                <JsonView value={call.input} openDepth={1} />
+                <JsonView value={call.output} openDepth={1} />
               </div>
             </div>
           ))}
@@ -252,7 +313,7 @@ function StepPanel({
                 <div style={{ fontSize: 12, marginBottom: 2 }}>
                   <strong>{entry.agentName}</strong>
                 </div>
-                <JsonBlock value={entry.output ?? null} />
+                <JsonView value={entry.output ?? null} openDepth={1} />
               </div>
             ))}
           </div>

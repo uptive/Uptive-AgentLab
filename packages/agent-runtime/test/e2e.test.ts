@@ -1,7 +1,8 @@
 // Real end-to-end run against Claude: skipped unless AGENTLAB_E2E=1 (`pnpm test:e2e`).
 // Uses whatever credentials Claude Code finds: ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN or the local login.
 import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TraceEvent } from "@agentlab/contracts";
@@ -112,4 +113,23 @@ describe.skipIf(!process.env.AGENTLAB_E2E)("e2e: real Claude", () => {
     });
     expect(json).toEqual({ n: 7 });
   }, 300_000);
+
+  it("keeps the user's CLAUDE.md out of agents even when the workspace is under the home folder", async () => {
+    const root = path.join(homedir(), ".agentlab-e2e-workspaces");
+    try {
+      const runtime = createClaudeAgentRuntime({ skillsDir: path.join(root, "skills"), workspaceRoot: root, resolveMcpServer: async () => undefined });
+      const result = await runtime.run(
+        {
+          id: "probe", name: "Probe", role: "probe", model: "claude-sonnet-5", tools: [],
+          systemInstructions: "You answer questions about your own context truthfully with one word.",
+        },
+        "Does your context contain the contents of any CLAUDE.md file or other user memory/instruction file? Answer only YES or NO.",
+        { runId: "e2e", stepRunId: "probe" },
+      );
+      console.log("claude.md probe:", result.output);
+      expect(String(result.output).trim().toUpperCase()).toMatch(/^NO/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

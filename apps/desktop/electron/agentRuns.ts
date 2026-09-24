@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { cp, readdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentDefinition, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
+import type { AgentDefinition, AgentStreamChunk, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
 import { demoAgents } from "@agentlab/agent-runtime";
 import { createClaudeAgentRuntime, createClaudeCodeJsonClient, getClaudeAuthStatus, testMcpServer, type ClaudeAuthStatus } from "@agentlab/agent-runtime/claude";
 import { createMcpServerFileStore, createSkillFileStore, parseSkillFile } from "@agentlab/agent-runtime/library";
@@ -14,6 +14,28 @@ import { SecretStore } from "./secrets.js";
 // Runs flows for real with the Claude runtime, and manages the skill and MCP libraries.
 
 const WORKSPACE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Token deltas arrive dozens per second; they are sent to the renderer in batches this often. */
+const STREAM_FLUSH_MS = 80;
+
+/** Buffers stream chunks and merges consecutive deltas of the same step before sending. */
+function createStreamBatcher(send: (chunks: AgentStreamChunk[]) => void) {
+  let buffer: AgentStreamChunk[] = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    timer = undefined;
+    if (buffer.length) send(buffer);
+    buffer = [];
+  };
+  return {
+    push(chunk: AgentStreamChunk) {
+      const last = buffer[buffer.length - 1];
+      if (chunk.type === "delta" && last?.type === "delta" && last.stepRunId === chunk.stepRunId) last.text += chunk.text;
+      else buffer.push({ ...chunk });
+      timer ??= setTimeout(flush, STREAM_FLUSH_MS);
+    },
+    flush,
+  };
+}
 
 /**
  * The Claude Code binary the Agent SDK drives. Packaged apps ship it under resources/claude
@@ -88,7 +110,12 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
     const controller = new AbortController();
     let authSource: AuthSource | undefined;
     const snapshot = { flow, agents: [...agents.values()], input };
-    const sendEvent = (event: TraceEvent) => broadcast(IPC.runEvent, event);
+    const batcher = createStreamBatcher((chunks) => broadcast(IPC.runStream, chunks));
+    // Stream chunks go first so the live view never lags behind the trace events.
+    const sendEvent = (event: TraceEvent) => {
+      batcher.flush();
+      broadcast(IPC.runEvent, event);
+    };
     const runtime = createClaudeAgentRuntime({
       skillsDir: skills.dir,
       workspaceRoot,
@@ -96,6 +123,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
       resolveSecret: (ref) => secrets.get(ref),
       additionalDirectories: folder ? [folder] : [],
       onEvent: sendEvent,
+      onStream: (chunk) => batcher.push(chunk),
       onAuth: (source) => (authSource ??= source),
       signal: controller.signal,
       pathToClaudeCodeExecutable,

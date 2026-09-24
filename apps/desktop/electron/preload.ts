@@ -93,6 +93,7 @@ const api: AgentLabApi = {
     cancel: (runId) => ipcRenderer.invoke(IPC.cancelRun, runId),
     onUpdate: (listener) => subscribe(IPC.runUpdate, listener),
     onEvent: (listener) => subscribe(IPC.runEvent, listener),
+    onStream: (listener) => subscribe(IPC.runStream, listener),
     pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   },
   claude: {
