@@ -16,8 +16,6 @@ interface Props {
   errors: FlowIssue[];
   levels?: string[][];
   run?: Run;
-  runInput: string;
-  onRunInputChange: (value: string) => void;
   json: string;
   locked: boolean;
   onUpdateNode: (id: string, patch: Partial<AgentNodeData>) => void;
@@ -33,7 +31,7 @@ export function Inspector(props: Props) {
   );
 }
 
-function FlowPanel({ flow, meta, onMetaChange, errors, levels, run, runInput, onRunInputChange, json, locked, agentsById }: Props) {
+function FlowPanel({ flow, meta, onMetaChange, errors, levels, json, locked, agentsById }: Props) {
   const label = (id: string) => {
     const node = flow.nodes.find((n) => n.id === id);
     return node?.label || agentsById.get(node?.agentId ?? "")?.name || id;
@@ -82,29 +80,6 @@ function FlowPanel({ flow, meta, onMetaChange, errors, levels, run, runInput, on
           </ol>
         </Section>
       ) : null}
-
-      <Section title="Test run (mock agents)">
-        <Field label="Input prompt">
-          <textarea
-            style={{ ...inputStyle, minHeight: 60, resize: "vertical" }}
-            value={runInput}
-            onChange={(e) => onRunInputChange(e.target.value)}
-          />
-        </Field>
-        {run ? (
-          <div style={{ display: "grid", gap: 4 }}>
-            <div>
-              Status: <StatusBadge status={run.status} />
-            </div>
-            {run.totalUsage ? (
-              <div style={{ opacity: 0.8 }}>
-                {run.totalUsage.inputTokens + run.totalUsage.outputTokens} tokens · ${run.totalUsage.estimatedCostUsd.toFixed(4)} ·{" "}
-                {run.totalUsage.latencyMs} ms
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </Section>
 
       <Section title="JSON">
         <pre style={preStyle}>{json}</pre>

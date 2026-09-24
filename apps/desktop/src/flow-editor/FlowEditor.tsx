@@ -205,12 +205,6 @@ function FlowEditorInner() {
     setNotice(undefined);
   };
 
-  const loadDemo = () => {
-    if (!confirmDiscard()) return;
-    loadGraph(flowToGraph(codeReviewFlow));
-    setNotice(undefined);
-  };
-
   const open = async () => {
     if (!confirmDiscard()) return;
     try {
@@ -292,7 +286,6 @@ function FlowEditorInner() {
             {filePath ?? "not saved"}
           </span>
           <button style={buttonBase} onClick={newFlow} disabled={running}>New</button>
-          <button style={buttonBase} onClick={loadDemo} disabled={running}>Demo</button>
           <button style={buttonBase} onClick={open} disabled={running}>Open…</button>
           <button style={buttonBase} onClick={() => save(false)}>Save</button>
           <button style={buttonBase} onClick={() => save(true)}>Save as…</button>
@@ -314,7 +307,7 @@ function FlowEditorInner() {
               disabled={!validation.valid}
               title={validation.valid ? "Run with mock agents" : "Fix validation problems first"}
             >
-              ▶ Run
+              ▶ Demo Run
             </button>
           )}
         </header>
@@ -381,8 +374,6 @@ function FlowEditorInner() {
             errors={validation.errors}
             levels={levels}
             run={run}
-            runInput={runInput}
-            onRunInputChange={setRunInput}
             json={json}
             locked={running}
             onUpdateNode={updateNode}
