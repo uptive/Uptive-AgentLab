@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { BaseEdge, getBezierPath, type EdgeProps } from "@xyflow/react";
+import { theme } from "../theme.js";
 import { DEMO_COLORS, useEditorContext } from "./EditorContext.js";
 
 /** Bezier edge that, during a demo run, shows a "handoff" token travelling to the next step. */
@@ -18,7 +19,7 @@ export function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourcePositio
     tokenRef.current.setAttribute("cy", String(p.y));
   }, [inFlight, progress, path]);
 
-  const stroke = !demo ? (selected ? DEMO_COLORS.done : "#9a9a9a") : progress === 1 ? DEMO_COLORS.done : inFlight ? DEMO_COLORS.running : DEMO_COLORS.idle;
+  const stroke = !demo ? (selected ? DEMO_COLORS.done : theme.edge) : progress === 1 ? DEMO_COLORS.done : inFlight ? DEMO_COLORS.running : DEMO_COLORS.idle;
 
   return (
     <>

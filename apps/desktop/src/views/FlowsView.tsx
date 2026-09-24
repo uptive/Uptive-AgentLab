@@ -6,6 +6,7 @@ import { FlowEditor } from "../flow-editor/FlowEditor.js";
 import { ProjectsView } from "../flow-editor/ProjectsView.js";
 import { errorMessage } from "../flow-editor/bridge.js";
 import { DANGER } from "../flow-editor/EditorContext.js";
+import { alpha } from "../theme.js";
 
 type Open = { filePath: string; flow: FlowDefinition };
 
@@ -29,7 +30,7 @@ export function FlowsView() {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {error ? <div style={{ padding: "8px 24px", color: DANGER, background: `${DANGER}22`, fontSize: 13 }}>{error}</div> : null}
+      {error ? <div style={{ padding: "8px 24px", color: DANGER, background: alpha(DANGER, 13), fontSize: 13 }}>{error}</div> : null}
       <div style={{ flex: 1, minHeight: 0 }}>
         <ProjectsView onOpen={onOpen} />
       </div>

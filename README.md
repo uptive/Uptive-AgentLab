@@ -27,19 +27,24 @@ Runs and trace events are persisted to MongoDB Atlas by the Electron main proces
 
 ### Agents API (for all groups)
 
-Saved agents live in the `agents` collection behind the `AgentStore` contract (`packages/contracts/src/agent.ts`). From any renderer view:
+Agents come from two stores behind the `AgentStore` contract (`packages/contracts/src/agent.ts`):
+
+- **Database** — the MongoDB `agents` collection, shared with the team.
+- **Local** — one JSON file per agent in `data/local-agents/`, which is gitignored. The folder is read at app startup and again when you press Refresh in the Agents view (`load({ reloadLocal: true })`), and local agents keep working when MongoDB is unreachable. A file without an `id` uses its file name as the id. Set `LOCAL_AGENTS_DIR` to use a different folder.
+
+From any renderer view:
 
 ```ts
-const agents = await window.agentlab.agents.list();
+const agents = await window.agentlab.agents.list(); // both stores; each agent has source: "local" | "database"
+const { agents, databaseError } = await window.agentlab.agents.load(); // also says why database agents are missing
 const agent = await window.agentlab.agents.get(id);
-const created = await window.agentlab.agents.create({ name, role, model, systemInstructions, tools: [] });
+const created = await window.agentlab.agents.create({ name, role, model, systemInstructions, tools: [] }); // MongoDB
+const local = await window.agentlab.agents.create(input, "local"); // data/local-agents/
 await window.agentlab.agents.update(id, { name: "New name" }); // partial; undefined clears a field
 await window.agentlab.agents.delete(id);
 ```
 
-`name`, `role`, `model` and `systemInstructions` are required.
-
-Agents are read from MongoDB and kept in two-way sync with `data/agents/*.json` (one file per agent, safe to commit). The sync runs at startup and whenever the agent list loads: an agent missing on one side is copied over, and when both copies differ the one with the newer `updatedAt` wins. Deletions are not inferred from a missing file, so delete agents in the app, which removes both copies. Set `AGENTS_DIR` to use a different folder. For tests and mocks, use `createMemoryAgentStore()` from `@agentlab/agent-runtime`, which follows the same contract.
+`name`, `role`, `model` and `systemInstructions` are required. `update` and `delete` go to whichever store holds the agent. For tests and mocks, use `createMemoryAgentStore()` from `@agentlab/agent-runtime`, which follows the same contract.
 
 Copy `.env.example` to `.env` in the repo root and fill in `MONGODB_URI` (optionally `MONGODB_DB`, default `agentlab`). `.env` is gitignored — never commit credentials.
 
