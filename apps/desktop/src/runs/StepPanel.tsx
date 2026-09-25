@@ -78,11 +78,13 @@ interface Props {
   status: LiveStatus[];
   context: { agentName: string; output: unknown }[];
   now: number;
+  /** Text of the back button, e.g. "Back to flow". */
+  backLabel: string;
   onClose: () => void;
 }
 
 /** Everything about one agent in a run: its numbers, result and a live feed of what it does. */
-export function StepPanel({ step, agent, label, feed, live, status, context, now, onClose }: Props) {
+export function StepPanel({ step, agent, label, feed, live, status, context, now, backLabel, onClose }: Props) {
   const usage = step.usage;
   const running = step.status === "running";
   const latencyMs = usage?.latencyMs ?? stepLatencyMs(step, now);
@@ -98,31 +100,35 @@ export function StepPanel({ step, agent, label, feed, live, status, context, now
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-        <div style={{ minWidth: 0 }}>
-          <strong style={{ fontSize: 16 }}>{label}</strong>
-          <div style={{ fontSize: 12, color: theme.textMuted }}>
-            {agent?.role ?? step.agentId} · {agent?.model ?? "unknown model"}
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <StatusBadge status={step.status} />
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: `1px solid ${theme.border}`,
-              borderRadius: 6,
-              padding: "4px 10px",
-              color: theme.textSecondary,
-              cursor: "pointer",
-              fontSize: 12,
-            }}
-          >
-            ← Back to flow
-          </button>
-        </div>
+      {/* Back sits where reading starts, above the title, not next to the status badge. */}
+      <button
+        type="button"
+        onClick={onClose}
+        title="Esc"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 12,
+          padding: "6px 12px 6px 8px",
+          background: theme.codeBg,
+          border: `1px solid ${theme.border}`,
+          borderRadius: 999,
+          color: theme.primary,
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: 600,
+        }}
+      >
+        <span aria-hidden style={{ fontSize: 15 }}>←</span> {backLabel}
+        <span style={{ fontSize: 11, fontWeight: 400, color: theme.textMuted }}>Esc</span>
+      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <strong style={{ fontSize: 18 }}>{label}</strong>
+        <StatusBadge status={step.status} />
+      </div>
+      <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+        {agent?.role ?? step.agentId} · {agent?.model ?? "unknown model"}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 16 }}>
@@ -147,7 +153,8 @@ export function StepPanel({ step, agent, label, feed, live, status, context, now
           {running ? null : <FinalAnswer step={step} />}
           <SectionLabel>{running ? "Live activity" : "What the agent did"}</SectionLabel>
           {hasActivity || step.toolCalls.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", maxHeight: "70vh" }}>
+            // Only a live feed scrolls on its own (to follow new output); otherwise the panel scrolls.
+            <div style={{ display: "flex", flexDirection: "column", maxHeight: running ? "70vh" : undefined }}>
               <RunFeed entries={activity} live={running} status={status} expandTools />
             </div>
           ) : (

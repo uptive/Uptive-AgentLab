@@ -98,10 +98,12 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
     return step ? (flow.nodes.find((node) => node.id === step.nodeId)?.label ?? agentName(step.agentId)) : "Agent";
   };
 
+  // A single-agent run has one node named like the run, so "Joke Teller / Joke Teller" would repeat itself.
+  const singleAgent = flow.nodes.length === 1;
   const crumbs = [
     { label: backLabel, onClick: onBack },
     { label: flow.name, onClick: selectedStep ? () => setSelectedNodeId(undefined) : undefined },
-    ...(selectedStep ? [{ label: selectedLabel }] : []),
+    ...(selectedStep ? [{ label: selectedLabel === flow.name ? "Agent details" : selectedLabel }] : []),
   ];
 
   return (
@@ -190,6 +192,7 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
               status={status.filter((line) => line.stepRunId === selectedStep.id)}
               context={stepContext}
               now={now}
+              backLabel={singleAgent ? "Back to run overview" : `Back to ${flow.name}`}
               onClose={() => setSelectedNodeId(undefined)}
             />
           ) : (
