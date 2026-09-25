@@ -65,15 +65,28 @@ export interface AgentRunsDeps {
   dataDir: string;
 }
 
+export interface StartedRun {
+  runId: string;
+  /** Settles with the final run once it completes, fails or is cancelled; never rejects. */
+  done: Promise<Run>;
+}
+
+export interface AgentRuns {
+  /** Settles once runs left open by a previous session have been closed out. */
+  recovered: Promise<void>;
+  startRun(request: StartRunRequest): Promise<StartedRun>;
+  cancelRun(runId: string): Promise<void>;
+}
+
 const secretRefFor = (serverId: string) => `mcp:${serverId}`;
 
 const isOpen = (run: Run) => run.status === "running" || run.status === "pending";
 
 /**
- * Registers the run and library IPC. Resolves once runs left open by a previous session (quit or
- * crash mid-run) have been closed out; anything that reads stored runs should wait for it.
+ * Registers the run and library IPC. `recovered` settles once runs left open by a previous session
+ * (quit or crash mid-run) have been closed out; anything that reads stored runs should wait for it.
  */
-export function registerAgentRunIpc(deps: AgentRunsDeps): Promise<void> {
+export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
   const skills = createSkillFileStore(process.env.SKILLS_DIR || path.join(deps.dataDir, "skills"));
   const mcpServers = createMcpServerFileStore(process.env.MCP_SERVERS_DIR || path.join(deps.dataDir, "mcp-servers"));
   const secrets = new SecretStore(path.join(app.getPath("userData"), "secrets.json"));
@@ -123,7 +136,12 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): Promise<void> {
     return resolved;
   }
 
-  ipcMain.handle(IPC.startRun, async (_e, request: StartRunRequest) => {
+  /**
+   * Starts a flow run. Resolves with the run id as soon as the engine has created the run, and
+   * `done` with the final run (also when it fails or is cancelled). Shared by the renderer IPC and
+   * the Claude Code bridge, so both show up in the same live feed and run history.
+   */
+  async function startRun(request: StartRunRequest): Promise<StartedRun> {
     await recovered;
     const { flow, input, folder } = request;
     if (folder && !(await stat(folder).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${folder}`);
@@ -133,7 +151,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): Promise<void> {
 
     const controller = new AbortController();
     let authSource: AuthSource | undefined;
-    const snapshot = { flow, agents: [...agents.values()], input };
+    const snapshot = { flow, agents: [...agents.values()], input, ...(request.startedBy ? { startedBy: request.startedBy } : {}) };
     const batcher = createStreamBatcher((chunks) => broadcast(IPC.runStream, chunks));
     // Stream chunks go first so the live view never lags behind the trace events.
     const sendEvent = (event: TraceEvent) => {
@@ -145,6 +163,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): Promise<void> {
     const sendRun = (run: Run) => {
       lastRun = run;
       void publishRun(run).catch((e) => console.warn("[runs] could not save run:", e.message));
+      return run;
     };
     const runtime = createClaudeAgentRuntime({
       skillsDir: skills.dir,
@@ -160,42 +179,51 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): Promise<void> {
     });
     const engine = createFlowEngine({ runtime, resolveAgent: (id) => agents.get(id), onEvent: sendEvent });
 
-    return new Promise<{ runId: string }>((resolve, reject) => {
+    return new Promise<StartedRun>((resolve, reject) => {
       let runId: string | undefined;
-      engine
-        .execute(flow, input, {
-          signal: controller.signal,
-          onRunUpdate: (run: Run) => {
-            if (!runId) {
-              runId = run.id;
-              active.set(runId, controller);
-              resolve({ runId });
-            }
-            sendRun({ ...run, ...snapshot, ...(authSource ? { authSource } : {}) });
-          },
-        })
+      let finish: (run: Run) => void = () => {};
+      const done = new Promise<Run>((r) => (finish = r));
+      const execution = engine.execute(flow, input, {
+        signal: controller.signal,
+        onRunUpdate: (run: Run) => {
+          if (!runId) {
+            runId = run.id;
+            active.set(runId, controller);
+            resolve({ runId, done });
+          }
+          sendRun({ ...run, ...snapshot, ...(authSource ? { authSource } : {}) });
+        },
+      });
+      execution
         .then((result) => {
           const run = { ...result, ...snapshot, authSource: authSource ?? "unknown" };
           // The engine leaves unscheduled steps pending when a run is stopped; show them as cancelled.
-          sendRun(controller.signal.aborted ? interruptRun(run, "Cancelled by user") : run);
+          finish(sendRun(controller.signal.aborted ? interruptRun(run, "Cancelled by user") : run));
         })
         .catch((error) => {
           if (!runId) return reject(error);
           console.error("[runs] run crashed:", error);
-          if (lastRun) sendRun(interruptRun(lastRun, `Run crashed: ${(error as Error).message}`));
+          if (lastRun) finish(sendRun(interruptRun(lastRun, `Run crashed: ${(error as Error).message}`)));
         })
         .finally(() => runId && active.delete(runId));
     });
-  });
+  }
 
-  ipcMain.handle(IPC.cancelRun, async (_e, runId: string) => {
+  async function cancelRun(runId: string): Promise<void> {
     const controller = active.get(runId);
     if (controller) return controller.abort();
     // Not running here (e.g. left open by a crash): close out the stored copy instead.
     await recovered;
     const run = await deps.telemetry.getRun(runId);
     if (run && isOpen(run)) await publishRun(interruptRun(run, "Cancelled by user"));
+  }
+
+  ipcMain.handle(IPC.startRun, async (_e, request: StartRunRequest) => {
+    const { runId } = await startRun({ ...request, startedBy: "app" });
+    return { runId };
   });
+
+  ipcMain.handle(IPC.cancelRun, (_e, runId: string) => cancelRun(runId));
 
   // Test runs from the agent editor: the same runtime as flow runs, but for an unsaved definition,
   // streamed on their own channel and never saved to telemetry.
@@ -320,7 +348,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): Promise<void> {
 
   ipcMain.handle(IPC.importClaudeDesktop, async (): Promise<ImportResult> => importClaudeDesktop(mcpServers, secrets));
 
-  return recovered;
+  return { recovered, startRun, cancelRun };
 }
 
 function claudeDesktopConfigPath(): string {

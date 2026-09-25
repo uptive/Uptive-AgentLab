@@ -62,6 +62,23 @@ pnpm dev:desktop
 
 This starts Vite + Electron with hot reload.
 
+## Run flows from Claude Code
+
+The desktop app can host a local MCP server, so Claude Code in this repo can list your saved flows
+and start runs. Runs execute in the app, so you can follow them live under **Runs**, where they are
+marked "from Claude Code". The server is off unless you set a token.
+
+1. Make a token: `openssl rand -hex 32`.
+2. Add `AGENTLAB_MCP_TOKEN=<token>` to the root `.env`. You can also set `AGENTLAB_MCP_PORT` (default `4780`).
+3. Export the same value in the shell you start Claude Code from: `export AGENTLAB_MCP_TOKEN=<token>`.
+4. Start the app (`pnpm dev:desktop`), then start `claude` in the repo and approve the `agentlab` server from `.mcp.json`.
+5. Ask something like "list the AgentLab flows and run Review with topic X".
+
+The tools are `list_flows`, `get_flow` (steps and the input schema), `start_run`, `list_agents`,
+`get_agent`, `start_agent_run` (one agent as a one-step flow), `get_run` (with `waitSeconds` to wait
+for the result), `cancel_run` and `list_runs`. The server only listens on 127.0.0.1, rejects browser
+requests, and only runs flows and agents that are already saved.
+
 ## Typecheck everything
 
 ```bash

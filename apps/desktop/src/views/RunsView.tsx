@@ -419,7 +419,8 @@ function RunDetail({
         </div>
       </div>
       <p style={{ color: theme.textMuted, marginTop: 4, fontSize: 12 }}>
-        Started {formatRelative(run.startedAt)} · {run.id}
+        Started {formatRelative(run.startedAt)}
+        {run.startedBy === "claude-code" ? " from Claude Code" : ""} · {run.id}
         {run.authSource && run.authSource !== "unknown"
           ? ` · paid by ${run.authSource === "subscription" ? "Claude subscription" : "API key"}`
           : ""}

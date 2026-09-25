@@ -40,9 +40,13 @@ export interface Run {
   input?: unknown;
   /** What paid for the model calls: a claude.ai subscription login, or an API key. */
   authSource?: AuthSource;
+  /** Where the run was started from: the app itself, or Claude Code through the local bridge. */
+  startedBy?: RunTrigger;
 }
 
 export type AuthSource = "subscription" | "api-key" | "unknown";
+
+export type RunTrigger = "app" | "claude-code";
 
 /**
  * Live output of a running step, streamed token by token. Not persisted: the finished content ends

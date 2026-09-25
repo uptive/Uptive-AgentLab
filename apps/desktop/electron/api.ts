@@ -10,6 +10,7 @@ import type {
   McpServerDefinition,
   McpServerInput,
   Run,
+  RunTrigger,
   SkillDefinition,
   TraceEvent,
   Usage,
@@ -44,6 +45,8 @@ export interface StartRunRequest {
   input: unknown;
   /** A folder agents may read (e.g. the repository a review flow looks at). */
   folder?: string;
+  /** Set by the main process; whatever the renderer sends here is overwritten. */
+  startedBy?: RunTrigger;
 }
 
 /** An unsaved agent run once from the editor. Not saved to Runs. */

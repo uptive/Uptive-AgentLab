@@ -1,3 +1,5 @@
+import type { AgentDefinition } from "./agent.js";
+
 export interface FlowNodePosition {
   x: number;
   y: number;
@@ -39,6 +41,16 @@ export interface FlowDefinition {
    */
   tags?: string[];
   nodes: FlowNode[];
+}
+
+/** Wraps a single agent in a one-node flow so it can go through the same engine and views. */
+export function singleAgentFlow(agent: Pick<AgentDefinition, "id" | "name">): FlowDefinition {
+  return {
+    id: `agent:${agent.id}`,
+    name: agent.name,
+    description: `Single-agent run of ${agent.name}`,
+    nodes: [{ id: agent.id, agentId: agent.id, dependsOn: [] }],
+  };
 }
 
 export interface FlowRecord extends FlowDefinition {
