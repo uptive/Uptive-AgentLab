@@ -2,13 +2,18 @@
 // renderer; it is exposed separately as `@agentlab/optimization/anthropic`.
 import Anthropic from "@anthropic-ai/sdk";
 import { DEFAULT_EVALUATOR_MODEL } from "../evaluatorModels.js";
-import type { JsonRequest, ModelClient } from "../types.js";
+import { estimateCostUsd, getModel } from "../modelCatalog.js";
+import type { JsonRequest, JsonResponse, ModelClient } from "../types.js";
 
 export function createAnthropicModelClient(options: { model?: string } = {}): ModelClient {
   let client: Anthropic | undefined;
 
-  return {
-    async generateJson({ system, prompt, schema, model = options.model ?? process.env.AGENT_MODEL ?? DEFAULT_EVALUATOR_MODEL }: JsonRequest) {
+  const self: ModelClient = {
+    async generateJson(request) {
+      return (await self.generateJsonWithUsage!(request)).value;
+    },
+    async generateJsonWithUsage({ system, prompt, schema, model = options.model ?? process.env.AGENT_MODEL ?? DEFAULT_EVALUATOR_MODEL }: JsonRequest): Promise<JsonResponse> {
+      const started = Date.now();
       try {
         // Resolves credentials from ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / `ant auth login` profile.
         client ??= new Anthropic();
@@ -41,7 +46,13 @@ export function createAnthropicModelClient(options: { model?: string } = {}): Mo
       if (response.stop_reason === "refusal") throw new Error("Claude declined to analyze this run");
       if (response.stop_reason === "max_tokens") throw new Error("Claude's response was cut off before it finished");
       const text = response.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
-      return JSON.parse(text);
+      const tokens = { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
+      const info = getModel(model);
+      return {
+        value: JSON.parse(text),
+        usage: { model, ...tokens, costUsd: info ? estimateCostUsd(info, tokens) : undefined, durationMs: Date.now() - started },
+      };
     },
   };
+  return self;
 }

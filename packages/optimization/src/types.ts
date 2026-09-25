@@ -49,6 +49,24 @@ export interface JsonRequest {
   schema: Record<string, unknown>;
   /** Model id for this call. Backends fall back to $AGENT_MODEL, then DEFAULT_EVALUATOR_MODEL. */
   model?: string;
+  /** Evaluator making the call, so its request and answer can be shown later. */
+  evaluatorId?: string;
+}
+
+/** What one model call used. */
+export interface ModelCallUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  /** Cost at API list prices (also reported when the call ran on a subscription). */
+  costUsd?: number;
+  durationMs: number;
+}
+
+/** A structured-output answer together with what the call used. */
+export interface JsonResponse {
+  value: unknown;
+  usage?: ModelCallUsage;
 }
 
 /**
@@ -58,4 +76,6 @@ export interface JsonRequest {
  */
 export interface ModelClient {
   generateJson(request: JsonRequest): Promise<unknown>;
+  /** Same call, also reporting tokens, cost and duration. Backends that can measure it implement this. */
+  generateJsonWithUsage?(request: JsonRequest): Promise<JsonResponse>;
 }

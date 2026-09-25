@@ -75,10 +75,18 @@ export function isLightStructuredStep(agent: AgentDefinition, step: StepRun): bo
   return Boolean(agent.outputSchema) && describesStructuredTask && (step.usage?.outputTokens ?? Infinity) < 1_000;
 }
 
-/** Number of model calls recorded for a step (1 when no trace events are available). */
+/**
+ * Attempts the step needed: 1 plus its failed model calls. Successful model_call events are turns of
+ * the agent's tool-use loop, not retries, so they don't count.
+ */
 export function modelCallAttempts(input: EvaluationInput, step: StepRun): number {
-  const calls = input.events?.filter((e) => e.type === "model_call" && e.stepRunId === step.id).length ?? 0;
-  return Math.max(calls, 1);
+  const failed =
+    input.events?.filter((e) => {
+      if (e.type !== "model_call" || e.stepRunId !== step.id) return false;
+      const data = e.data as { outcome?: string; error?: unknown } | undefined;
+      return data?.outcome === "error" || Boolean(data?.error);
+    }).length ?? 0;
+  return 1 + failed;
 }
 
 /** Measured latency of a step: from usage, else from timestamps. */
@@ -123,11 +131,37 @@ export function criticalPathMs(
   return Math.max(0, ...[...scheduleMs(input, stepDeltaMs, dependsOnOverrides).values()].map((t) => t.endMs));
 }
 
+/**
+ * A reference in an input mapping, in the flow engine's format: "$input" / "$input.<path>" for the
+ * run input, "<nodeId>" / "<nodeId>.<path>" for an upstream node's output.
+ */
+export type SourceRef = { kind: "input"; path: string[] } | { kind: "node"; nodeId: string; path: string[] };
+
+export function parseSource(source: string): SourceRef {
+  const [root, ...path] = source.split(".");
+  return root === "$input" ? { kind: "input", path } : { kind: "node", nodeId: root, path };
+}
+
+/**
+ * The node's input mapping. Nodes without an explicit one get the mapping the flow engine applies
+ * (see `buildNodeInput` in @agentlab/flow-engine): no dependencies → the run input, one dependency →
+ * that node's output, several → `{ [depNodeId]: output }`. Field names come from the recorded input.
+ */
+export function inputMappingOf(input: EvaluationInput, node: FlowNode): Record<string, string> {
+  if (node.inputMapping) return node.inputMapping;
+  if (node.dependsOn.length > 1) return Object.fromEntries(node.dependsOn.map((dep) => [dep, dep]));
+  const received = stepForNode(input, node.id)?.input;
+  const fields = received && typeof received === "object" && !Array.isArray(received) ? Object.keys(received) : [];
+  const root = node.dependsOn.length === 1 ? node.dependsOn[0] : "$input";
+  return fields.length ? Object.fromEntries(fields.map((field) => [field, `${root}.${field}`])) : { input: root };
+}
+
 /** Upstream node ids whose output this node actually reads through its input mapping. */
-export function consumedNodeOutputs(node: FlowNode): string[] {
-  const ids = Object.values(node.inputMapping ?? {}).flatMap((source) => {
-    const match = /^([^.$]+)\.output(?:\.|$)/.exec(source);
-    return match ? [match[1]] : [];
+export function consumedNodeOutputs(input: EvaluationInput, node: FlowNode): string[] {
+  const nodeIds = new Set(input.flow.nodes.map((n) => n.id));
+  const ids = Object.values(inputMappingOf(input, node)).flatMap((source) => {
+    const ref = parseSource(source);
+    return ref.kind === "node" && nodeIds.has(ref.nodeId) ? [ref.nodeId] : [];
   });
   return [...new Set(ids)];
 }

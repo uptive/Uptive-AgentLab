@@ -4,7 +4,7 @@
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { DEFAULT_EVALUATOR_MODEL } from "../evaluatorModels.js";
-import type { JsonRequest, ModelClient } from "../types.js";
+import type { JsonRequest, JsonResponse, ModelCallUsage, ModelClient } from "../types.js";
 
 export interface ClaudeCliOptions {
   /** Path or name of the CLI binary. Defaults to $CLAUDE_BIN, then `claude` on PATH. */
@@ -24,6 +24,10 @@ interface CliEnvelope {
   result?: string;
   structured_output?: unknown;
   total_cost_usd?: number;
+  duration_ms?: number;
+  usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+  /** Totals per model over every turn of the call; `total_cost_usd` is the sum of their costUSD. */
+  modelUsage?: Record<string, { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number; costUSD?: number }>;
 }
 
 export class ClaudeCliError extends Error {
@@ -52,6 +56,11 @@ function classifyFailure(text: string, status?: number | null): ClaudeCliError {
 
 /** Reads the model's JSON answer out of the CLI envelope: `structured_output` if present, else `result` parsed again. */
 export function parseCliOutput(stdout: string, stderr = ""): unknown {
+  return parseCliEnvelope(stdout, stderr).value;
+}
+
+/** The answer plus what the call used, as the CLI reports it. */
+export function parseCliEnvelope(stdout: string, stderr = "", model = ""): JsonResponse {
   let envelope: CliEnvelope;
   try {
     envelope = JSON.parse(stdout) as CliEnvelope;
@@ -62,11 +71,22 @@ export function parseCliOutput(stdout: string, stderr = ""): unknown {
   if (envelope.is_error || envelope.subtype !== "success") {
     throw classifyFailure(`${envelope.result ?? ""}\n${stderr}`, envelope.api_error_status);
   }
-  if (envelope.structured_output !== undefined && envelope.structured_output !== null) return envelope.structured_output;
+  // Tokens from modelUsage when present: it covers every turn, like total_cost_usd does. `usage`
+  // can cover fewer turns, which would show a cost that doesn't match the tokens.
+  const perModel = Object.values(envelope.modelUsage ?? {});
+  const u = envelope.usage ?? {};
+  const tokens = perModel.length
+    ? {
+        inputTokens: perModel.reduce((sum, m) => sum + (m.inputTokens ?? 0) + (m.cacheReadInputTokens ?? 0) + (m.cacheCreationInputTokens ?? 0), 0),
+        outputTokens: perModel.reduce((sum, m) => sum + (m.outputTokens ?? 0), 0),
+      }
+    : { inputTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0), outputTokens: u.output_tokens ?? 0 };
+  const usage: ModelCallUsage = { model, ...tokens, costUsd: envelope.total_cost_usd, durationMs: envelope.duration_ms ?? 0 };
+  if (envelope.structured_output !== undefined && envelope.structured_output !== null) return { value: envelope.structured_output, usage };
 
   const raw = envelope.result ?? "";
   try {
-    return JSON.parse(raw);
+    return { value: JSON.parse(raw), usage };
   } catch {
     console.error("[claude-cli] result is not valid JSON:\n" + raw);
     throw new ClaudeCliError("invalid-output", `Claude answered with text instead of JSON: "${raw.slice(0, 200)}${raw.length > 200 ? "…" : ""}"`);
@@ -86,8 +106,11 @@ export function createClaudeCliModelClient(options: ClaudeCliOptions = {}): Mode
   const defaultModel = options.model ?? process.env.AGENT_MODEL ?? DEFAULT_EVALUATOR_MODEL;
   const timeoutMs = options.timeoutMs ?? 5 * 60_000;
 
-  return {
-    generateJson({ system, prompt, schema, model = defaultModel }: JsonRequest) {
+  const client: ModelClient = {
+    async generateJson(request) {
+      return (await client.generateJsonWithUsage!(request)).value;
+    },
+    generateJsonWithUsage({ system, prompt, schema, model = defaultModel }: JsonRequest) {
       const args = [
         "-p",
         "--output-format",
@@ -108,7 +131,8 @@ export function createClaudeCliModelClient(options: ClaudeCliOptions = {}): Mode
         JSON.stringify(schema),
       ];
 
-      return new Promise<unknown>((resolve, reject) => {
+      const started = Date.now();
+      return new Promise<JsonResponse>((resolve, reject) => {
         // spawn (not execFile) so the prompt goes through stdin: no argument-length limit and no
         // shell, and a large Run fixture never ends up on the command line.
         // cwd is a temp dir so the CLI doesn't pick up this repo's CLAUDE.md or settings.
@@ -147,7 +171,9 @@ export function createClaudeCliModelClient(options: ClaudeCliOptions = {}): Mode
         child.on("close", (code) =>
           finish(() => {
             try {
-              resolve(parseCliOutput(stdout, stderr));
+              const response = parseCliEnvelope(stdout, stderr, model);
+              if (response.usage && !response.usage.durationMs) response.usage.durationMs = Date.now() - started;
+              resolve(response);
             } catch (error) {
               if (code !== 0 && !stdout.trim()) reject(classifyFailure(stderr || `exit code ${code}`));
               else reject(error);
@@ -160,4 +186,5 @@ export function createClaudeCliModelClient(options: ClaudeCliOptions = {}): Mode
       });
     },
   };
+  return client;
 }

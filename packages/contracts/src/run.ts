@@ -40,6 +40,18 @@ export interface Run {
   input?: unknown;
   /** What paid for the model calls: a claude.ai subscription login, or an API key. */
   authSource?: AuthSource;
+  /**
+   * Set when the run tested suggested changes on copies of the flow and agents (from Optimize).
+   * The saved agents and flow were not changed by it.
+   */
+  trial?: RunTrial;
+}
+
+export interface RunTrial {
+  /** The run whose analysis suggested the changes. */
+  baseRunId: string;
+  /** Recommendations whose changes this run tested. */
+  recommendationIds: string[];
 }
 
 export type AuthSource = "subscription" | "api-key" | "unknown";

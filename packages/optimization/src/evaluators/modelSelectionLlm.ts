@@ -84,6 +84,7 @@ export function createModelSelectionLlmEvaluator(client: ModelClient): Evaluator
     fallback: modelSelectionEvaluator,
     async evaluate(input) {
       const response = (await client.generateJson({
+        evaluatorId: EVALUATOR_ID,
         system: MODEL_SELECTION_SYSTEM_PROMPT,
         prompt: `Review the model choice for each step of this run.\n\n${JSON.stringify(buildModelSelectionFacts(input), null, 2)}`,
         schema: SCHEMA,

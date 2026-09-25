@@ -1,5 +1,5 @@
 import type { Recommendation, RecommendationChange, RecommendationSeverity } from "@agentlab/contracts";
-import { stepForNode } from "../helpers.js";
+import { inputMappingOf, parseSource, stepForNode } from "../helpers.js";
 import type { EvaluationInput, Evaluator, ModelClient } from "../types.js";
 import { TAG_INSTRUCTIONS, TAGS_SCHEMA, toTags } from "../tags.js";
 import { excerpt, runTask } from "./llmFacts.js";
@@ -39,7 +39,7 @@ Only report problems the data supports, and quote the concrete values in evidenc
 For each finding, targetNodeId is the step where the fix belongs (often the producing step for a handoff). Pick one changeType and give the exact proposal:
 - add-output-schema: proposal is a JSON Schema (as a JSON string) for the target agent's output.
 - edit-instructions: proposal is the complete rewritten system instructions for the target agent.
-- edit-input-mapping: proposal is a JSON object (as a JSON string) mapping the target step's input fields to sources, using "$input.<field>" or "<nodeId>.output.<path>".
+- edit-input-mapping: proposal is a JSON object (as a JSON string) mapping the target step's input fields to sources, using "$input.<field>" for the run input or "<nodeId>.<field>" for an upstream step's output (the step's whole output is "<nodeId>"). A step without an inputMapping receives the run input when it has no dependencies, its single dependency's output, or an object keyed by dependency node id.
 - extend-run-input: proposal is a JSON object (as a JSON string) of fields to add to the run input.
 For checks other than handoff, set consumerNodeId and field to "". Titles are short imperative headlines (at most 8 words). expectedEffect is one sentence on what improves.
 
@@ -78,7 +78,7 @@ const SCHEMA = {
 
 export function buildQualityFacts(input: EvaluationInput) {
   const handoffs = input.flow.nodes.flatMap((consumer) =>
-    Object.entries(consumer.inputMapping ?? {}).flatMap(([field, source]) => {
+    Object.entries(inputMappingOf(input, consumer)).flatMap(([field, source]) => {
       const resolved = resolveOutputPath(input, source);
       if (!resolved) return [];
       const passed = (stepForNode(input, consumer.id)?.input as Record<string, unknown> | undefined)?.[field];
@@ -107,7 +107,8 @@ export function buildQualityFacts(input: EvaluationInput) {
           ? { name: agent.name, role: agent.role, systemInstructions: agent.systemInstructions, outputSchema: agent.outputSchema ?? null }
           : { id: node.agentId },
         dependsOn: node.dependsOn,
-        inputMapping: node.inputMapping ?? {},
+        inputMapping: inputMappingOf(input, node),
+        explicitInputMapping: Boolean(node.inputMapping),
         status: step?.status ?? "not run",
         input: excerpt(step?.input ?? null, 6000),
         output: excerpt(step?.output ?? null, 4000),
@@ -134,7 +135,7 @@ export function toQualityRecommendation(input: EvaluationInput, finding: Quality
 
   if (finding.check === "handoff") {
     const consumer = input.flow.nodes.find((n) => n.id === finding.consumerNodeId);
-    if (!consumer?.inputMapping?.[finding.field]) return `${finding.consumerNodeId}.${finding.field} is not a mapped input`;
+    if (!consumer || !inputMappingOf(input, consumer)[finding.field]) return `${finding.consumerNodeId}.${finding.field} is not a mapped input`;
   }
 
   let change: RecommendationChange;
@@ -155,10 +156,14 @@ export function toQualityRecommendation(input: EvaluationInput, finding: Quality
       const valid =
         mapping &&
         Object.values(mapping).every(
-          (source) => typeof source === "string" && (source.startsWith("$input.") || nodeIds.has(source.split(".output")[0])),
+          (source) => {
+            if (typeof source !== "string") return false;
+            const ref = parseSource(source);
+            return ref.kind === "input" || nodeIds.has(ref.nodeId);
+          },
         );
       if (!valid) return "proposed input mapping is not valid";
-      change = { type: "edit-input-mapping", path: `nodes.${node.id}.inputMapping`, before: node.inputMapping ?? {}, after: mapping };
+      change = { type: "edit-input-mapping", path: `nodes.${node.id}.inputMapping`, before: inputMappingOf(input, node), after: mapping };
       break;
     }
     case "extend-run-input": {
@@ -205,6 +210,7 @@ export function createQualityLlmEvaluator(client: ModelClient): Evaluator {
     fallback: qualityEvaluator,
     async evaluate(input) {
       const response = (await client.generateJson({
+        evaluatorId: EVALUATOR_ID,
         system: QUALITY_SYSTEM_PROMPT,
         prompt: `Review the quality of this run.\n\n${JSON.stringify(buildQualityFacts(input), null, 2)}`,
         schema: SCHEMA,

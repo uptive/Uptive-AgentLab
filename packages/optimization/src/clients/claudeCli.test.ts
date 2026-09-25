@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ClaudeCliError, createClaudeCliModelClient } from "./claudeCli.js";
+import { ClaudeCliError, createClaudeCliModelClient, parseCliEnvelope } from "./claudeCli.js";
 
 const dir = mkdtempSync(path.join(tmpdir(), "fake-claude-"));
 let count = 0;
@@ -116,5 +116,33 @@ describe("Claude Code CLI model client", () => {
     const error = (await createClaudeCliModelClient({ bin, timeoutMs: 300 }).generateJson(request).catch((e: unknown) => e)) as ClaudeCliError;
     expect(error).toBeInstanceOf(ClaudeCliError);
     expect(error.kind).toBe("timeout");
+  });
+});
+
+describe("parseCliEnvelope", () => {
+  it("reports tokens (including cached input), cost and duration", () => {
+    const stdout = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      structured_output: { findings: [] },
+      total_cost_usd: 0.0123,
+      duration_ms: 4200,
+      usage: { input_tokens: 100, cache_creation_input_tokens: 20, cache_read_input_tokens: 30, output_tokens: 40 },
+    });
+    expect(parseCliEnvelope(stdout, "", "claude-sonnet-5")).toEqual({
+      value: { findings: [] },
+      usage: { model: "claude-sonnet-5", inputTokens: 150, outputTokens: 40, costUsd: 0.0123, durationMs: 4200 },
+    });
+  });
+
+  it("counts tokens over every turn when the CLI reports per-model totals", () => {
+    const stdout = JSON.stringify({
+      subtype: "success",
+      structured_output: {},
+      total_cost_usd: 0.05,
+      usage: { input_tokens: 1000, output_tokens: 100 },
+      modelUsage: { "claude-haiku-4-5": { inputTokens: 5000, cacheReadInputTokens: 2000, outputTokens: 8000, costUSD: 0.05 } },
+    });
+    expect(parseCliEnvelope(stdout).usage).toMatchObject({ inputTokens: 7000, outputTokens: 8000, costUsd: 0.05 });
   });
 });

@@ -46,12 +46,19 @@ describe("Flow Design evaluator", () => {
     expect(recs.map((r) => r.id)).toContain("flow-design:duplicated-work:plan:plan-again");
   });
 
-  it("flags agents whose roles overlap", async () => {
+  it("flags agents whose instructions overlap", async () => {
+    const codeReviewer = codeReviewFixture.agents.find((a) => a.id === "code-reviewer")!;
     const agents = codeReviewFixture.agents.map((a) =>
-      a.id === "security-reviewer" ? { ...a, role: "Reviews correctness, error handling and security of the change." } : a,
+      a.id === "security-reviewer" ? { ...a, systemInstructions: `${codeReviewer.systemInstructions} Also check security.` } : a,
     );
     const recs = await flowDesignEvaluator.evaluate({ ...codeReviewFixture, agents });
     expect(recs.map((r) => r.id)).toContain("flow-design:unclear-responsibilities:code-review:security-review");
+  });
+
+  it("doesn't treat a shared role label as overlapping responsibilities", async () => {
+    const agents = codeReviewFixture.agents.map((a) => (a.id === "code-reviewer" || a.id === "security-reviewer" ? { ...a, role: "reviewer" } : a));
+    const recs = await flowDesignEvaluator.evaluate({ ...codeReviewFixture, agents });
+    expect(recs.map((r) => r.id).filter((id) => /unclear-responsibilities|duplicated-work/.test(id))).toEqual([]);
   });
 
   it("appears alongside the other categories and feeds the projected latency", async () => {

@@ -19,10 +19,11 @@ import {
 import type { PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createFileTelemetryStore } from "@agentlab/observability/file";
+import { createMongoRunReader, type MongoRunReader } from "@agentlab/observability/mongo";
 import { createMongoAgentStore, createMongoRoleStore, type MongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
 import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
-import type { JsonRequest } from "@agentlab/optimization";
+import type { JsonRequest, JsonResponse } from "@agentlab/optimization";
 import { createModelClient } from "@agentlab/optimization/models";
 import { generateAgentDraft } from "./agentDraft.js";
 import { createClaudeCliRuntime } from "@agentlab/agent-runtime/claude-cli";
@@ -75,6 +76,7 @@ interface Stores {
   agents: MongoAgentStore;
   flows: FlowStore;
   roles: AgentRoleStore;
+  sharedRuns: MongoRunReader;
 }
 
 let stores: Promise<Stores> | undefined;
@@ -91,12 +93,13 @@ async function connect(): Promise<Stores> {
   });
   await client.connect();
   const db = client.db(process.env.MONGODB_DB || "agentlab");
-  // Runs are not stored here: telemetry is local to each computer (see the telemetry handlers).
+  // New runs are not stored here: telemetry is local to each computer (see the telemetry handlers).
+  // Runs saved before that are still read, read-only, so Optimize can analyze them.
   const [agents, flows, roles] = await Promise.all([createMongoAgentStore(db), createMongoFlowStore(db), createMongoRoleStore(db)]);
 
   // Flows saved to MongoDB are independent of local flow files (no mirroring): the flows list
   // shows both sources together, and the user picks where each flow lives.
-  return { client, agents, flows, roles };
+  return { client, agents, flows, roles, sharedRuns: createMongoRunReader(db) };
 }
 
 function getStores(): Promise<Stores> {
@@ -359,12 +362,25 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   // Claude Code CLI and your Claude.ai subscription; AGENT_BACKEND=api uses the Anthropic API.
   const modelClient = createModelClient();
   console.log(`[optimize] model backend: ${process.env.AGENT_BACKEND ?? "cli"}`);
-  ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
+  ipcMain.handle(IPC.generateJson, async (_e, request: JsonRequest): Promise<JsonResponse> =>
+    modelClient.generateJsonWithUsage ? modelClient.generateJsonWithUsage(request) : { value: await modelClient.generateJson(request) },
+  );
 
   ipcMain.handle(IPC.listCloudFlows, async () => (await getStores()).flows.list());
   ipcMain.handle(IPC.getCloudFlow, async (_e, id: string) => (await getStores()).flows.get(id));
   ipcMain.handle(IPC.saveCloudFlow, async (_e, flow: FlowDefinition) => (await getStores()).flows.save(flow));
   ipcMain.handle(IPC.deleteCloudFlow, async (_e, id: string) => (await getStores()).flows.delete(id));
+
+  // Optimize also lists runs saved to MongoDB earlier. Without a database connection it shows local runs only.
+  ipcMain.handle(IPC.listSharedRuns, async () => {
+    try {
+      return await (await getStores()).sharedRuns.listRuns();
+    } catch (err) {
+      console.warn("[optimize] shared runs unavailable:", (err as Error).message);
+      return [];
+    }
+  });
+  ipcMain.handle(IPC.getSharedRun, async (_e, runId: string) => (await getStores()).sharedRuns.getRun(runId));
 
   ipcMain.handle("telemetry:recordEvent", (_e, event: TraceEvent) => telemetry.recordEvent(event));
   ipcMain.handle("telemetry:listEvents", (_e, runId: string) => telemetry.listEvents(runId));

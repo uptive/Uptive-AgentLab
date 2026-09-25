@@ -1,4 +1,4 @@
-export type { AnalyzeOptions, EvaluationInput, Evaluator, EvaluatorProgress, JsonRequest, ModelClient } from "./types.js";
+export type { AnalyzeOptions, EvaluationInput, Evaluator, EvaluatorProgress, JsonRequest, JsonResponse, ModelCallUsage, ModelClient } from "./types.js";
 export { CATEGORIES, analyzeRun, compareRecommendations, createEvaluators, defaultEvaluators } from "./analyzeRun.js";
 export { qualityEvaluator } from "./evaluators/quality.js";
 export { modelSelectionEvaluator } from "./evaluators/modelSelection.js";
@@ -9,3 +9,5 @@ export { createModelSelectionLlmEvaluator } from "./evaluators/modelSelectionLlm
 export { MODEL_CATALOG, getModel, type ModelInfo, type ModelTier } from "./modelCatalog.js";
 export { DEFAULT_EVALUATOR_MODEL, EVALUATOR_MODELS, type EvaluatorModel } from "./evaluatorModels.js";
 export { codeReviewFixture } from "./fixtures/codeReviewRun.js";
+export { toEvaluationInput, type RunInputResult, type RunLookups } from "./runInput.js";
+export { FIELD_LABELS, conflictsWith, describeEdit, notTestableReason, planChanges, type ChangePlan, type EditField, type EditTarget, type PlannedEdit } from "./changes.js";
