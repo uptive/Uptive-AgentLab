@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { AgentDefinition, FlowDefinition, Run, RunStatus, StepRun, TraceEvent } from "@agentlab/contracts";
 import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
 import { findFlow, validateFlow } from "@agentlab/flow-engine";
@@ -10,6 +10,8 @@ import { singleAgentFlow, startRun, stopRun } from "../runs/runLauncher.js";
 import { buildActivity, canRunForReal, connectLiveRuns, useLiveStep } from "../liveRuns.js";
 import { ActivityView } from "../runs/ActivityView.js";
 import { JsonView } from "../runs/JsonView.js";
+import { InputForm } from "../runs/InputForm.js";
+import { buildInputForm, collectInput, firstAgent, formValuesFromInput, type FormObject } from "../runs/inputSchemaForm.js";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
   pending: theme.statusDraft,
@@ -543,6 +545,9 @@ function NewRunDialog({
   const [flowId, setFlowId] = useState<string>(catalog.flows[0]?.flow.id ?? "");
   const [agentId, setAgentId] = useState<string>(catalog.agents[0]?.id ?? "");
   const [inputText, setInputText] = useState<string>("");
+  const [editAsJson, setEditAsJson] = useState(false);
+  const [formValues, setFormValues] = useState<FormObject>({});
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | undefined>(undefined);
 
   // The catalog loads after the dialog opens, so pick the first entry once there is one.
@@ -558,11 +563,48 @@ function NewRunDialog({
   const problems = validation?.errors.map((issue) => issue.message) ?? [];
   const canStart = chosen !== undefined && problems.length === 0;
 
+  const inputAgent = chosen ? firstAgent(chosen, (id) => catalog.agentsById.get(id)) : undefined;
+  const inputForm = useMemo(() => buildInputForm(inputAgent?.inputSchema), [inputAgent?.inputSchema]);
+  const showForm = inputForm !== undefined && !editAsJson;
+
+  // A different first agent means a different form; start from its schema defaults.
+  useEffect(() => {
+    setFormValues(inputForm?.initialValues ?? {});
+    setFormErrors({});
+    setEditAsJson(false);
+  }, [inputForm]);
+
+  const toggleJson = () => {
+    if (!inputForm) return;
+    if (!editAsJson) {
+      const collected = collectInput(inputForm.fields, formValues);
+      if (collected.ok) setInputText(JSON.stringify(collected.value, null, 2));
+    } else if (inputText.trim()) {
+      // Carry JSON edits back into the form; stay on the JSON view if it doesn't parse.
+      try {
+        setFormValues(formValuesFromInput(inputForm.fields, JSON.parse(inputText)));
+        setFormErrors({});
+      } catch {
+        setError("Input must be valid JSON to switch back to the form.");
+        return;
+      }
+    }
+    setError(undefined);
+    setEditAsJson(!editAsJson);
+  };
+
   const submit = () => {
     if (!chosen || !canStart) return;
     let parsed: unknown = undefined;
     const trimmed = inputText.trim();
-    if (trimmed.length > 0) {
+    if (showForm) {
+      const collected = collectInput(inputForm.fields, formValues);
+      if (!collected.ok) {
+        setFormErrors(collected.errors);
+        return;
+      }
+      parsed = collected.value;
+    } else if (trimmed.length > 0) {
       try {
         parsed = JSON.parse(trimmed);
       } catch {
@@ -619,8 +661,11 @@ function NewRunDialog({
           border: `1px solid ${theme.border}`,
           borderRadius: 12,
           padding: 24,
-          width: 520,
+          width: 560,
           maxWidth: "90vw",
+          maxHeight: "90vh",
+          overflowY: "auto",
+          boxSizing: "border-box",
           color: theme.text,
           boxShadow: theme.drawerShadow,
         }}
@@ -695,23 +740,51 @@ function NewRunDialog({
           </div>
         ) : null}
 
-        <label style={{ ...labelStyle, marginTop: 16 }}>Input (JSON)</label>
-        <textarea
-          value={inputText}
-          onChange={(e) => {
-            setInputText(e.target.value);
-            setError(undefined);
-          }}
-          rows={7}
-          style={{
-            ...fieldStyle,
-            padding: 10,
-            border: `1px solid ${error ? theme.danger : theme.border}`,
-            fontFamily: theme.fontMono,
-            fontSize: 12,
-            resize: "vertical",
-          }}
-        />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 16 }}>
+          <label style={labelStyle}>{showForm ? `Input for ${inputAgent?.name ?? "the first agent"}` : "Input (JSON)"}</label>
+          {inputForm && (
+            <button
+              type="button"
+              onClick={toggleJson}
+              style={{ background: "none", border: "none", padding: 0, color: theme.primary, cursor: "pointer", fontSize: 12 }}
+            >
+              {editAsJson ? "Use form" : "Edit as JSON"}
+            </button>
+          )}
+        </div>
+        {showForm ? (
+          <InputForm
+            fields={inputForm.fields}
+            values={formValues}
+            errors={formErrors}
+            fieldStyle={fieldStyle}
+            onChange={(values, changedPath) => {
+              setFormValues(values);
+              // Clear errors on the edited field and anything nested under it.
+              setFormErrors((current) =>
+                Object.fromEntries(Object.entries(current).filter(([path]) => path !== changedPath && !path.startsWith(`${changedPath}.`))),
+              );
+              setError(undefined);
+            }}
+          />
+        ) : (
+          <textarea
+            value={inputText}
+            onChange={(e) => {
+              setInputText(e.target.value);
+              setError(undefined);
+            }}
+            rows={7}
+            style={{
+              ...fieldStyle,
+              padding: 10,
+              border: `1px solid ${error ? theme.danger : theme.border}`,
+              fontFamily: theme.fontMono,
+              fontSize: 12,
+              resize: "vertical",
+            }}
+          />
+        )}
         {error && <div style={{ color: theme.danger, fontSize: 12, marginTop: 6 }}>{error}</div>}
 
         {canRunForReal() && (
