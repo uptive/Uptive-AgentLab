@@ -39,9 +39,9 @@ function Thinking({ block, streaming }: { block: ActivityBlock; streaming: boole
   );
 }
 
-function ToolUse({ block, streaming }: { block: ActivityBlock; streaming: boolean }) {
-  const [showInput, setShowInput] = useState(false);
-  const [showOutput, setShowOutput] = useState(false);
+function ToolUse({ block, streaming, expanded }: { block: ActivityBlock; streaming: boolean; expanded: boolean }) {
+  const [showInput, setShowInput] = useState(expanded);
+  const [showOutput, setShowOutput] = useState(expanded);
   const done = block.output !== undefined;
   const input = block.input ?? parseInput(block.text);
   const summary = summarizeToolCall(block.toolName, input);
@@ -112,10 +112,13 @@ function parseInput(text: string): unknown {
   }
 }
 
-/** One thinking, text or tool block; the last one streams while the step runs. */
-export function ActivityBlockView({ block, streaming }: { block: ActivityBlock; streaming: boolean }) {
+/**
+ * One thinking, text or tool block; the last one streams while the step runs. `expanded` opens
+ * tool arguments and results up front, for the single-agent view.
+ */
+export function ActivityBlockView({ block, streaming, expanded = false }: { block: ActivityBlock; streaming: boolean; expanded?: boolean }) {
   if (block.kind === "thinking") return <Thinking block={block} streaming={streaming} />;
-  if (block.kind === "tool_use") return <ToolUse block={block} streaming={streaming} />;
+  if (block.kind === "tool_use") return <ToolUse block={block} streaming={streaming} expanded={expanded} />;
   return (
     <div style={{ whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.55, color: theme.text }}>
       {block.text}

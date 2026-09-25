@@ -86,7 +86,6 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 **Persistence (observability)**
 - `telemetry:save` re-inserts every event on every flush with `insertOne`, so each save after the first throws E11000, and the error is swallowed. `packages/observability/src/mongo.ts:25`, `main.ts:394-401`. **Fix:** make `recordEvent` an upsert or unordered `bulkWrite`, send only deltas, and let errors reach the renderer's retry (`runsPersistence.ts:43-52` must rethrow).
 - Once a snapshot is over 25 MB, every save fails silently and permanently. `main.ts:392`. **Fix:** incremental saves (above), and a persistent error in the UI.
-- Hydrating while live events arrive duplicates events in memory. `packages/observability/src/index.ts:195`. **Fix:** dedupe with a `Set` of event ids.
 - Queries are unbounded, with one `listEvents` per run (N+1). `mongo.ts:28,39`, `main.ts:380`. **Fix:** a paginated `listRuns`, and `find({ runId: { $in } })`.
 
 **Flow engine / runtime**

@@ -6,7 +6,7 @@ import { useLiveSteps } from "../liveRuns.js";
 import type { Catalog } from "./catalog.js";
 import { formatMs, formatRelative, formatUsd } from "./format.js";
 import { RunFeed } from "./RunFeed.js";
-import { buildRunFeed } from "./feedEntries.js";
+import { buildLiveStatus, buildRunFeed } from "./feedEntries.js";
 import { RunGraph } from "./RunGraph.js";
 import { stopRun } from "./runLauncher.js";
 import { StatusBadge, buttonStyle, resolveRunFlow, useNow } from "./runUi.js";
@@ -64,6 +64,7 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
   const stepByNodeId = new Map(run.steps.map((step) => [step.nodeId, step]));
   const stepById = new Map(run.steps.map((step) => [step.id, step]));
   const feed = buildRunFeed(run, events, liveSteps, agentName);
+  const status = buildLiveStatus(run, flow, liveSteps, agentName, now);
 
   const completedSteps = run.steps.filter((step) => step.status === "completed").length;
   const runningSteps = run.steps.filter((step) => step.status === "running");
@@ -169,6 +170,7 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
               label={selectedLabel}
               feed={feed.filter((entry) => entry.stepRunId === selectedStep.id)}
               live={liveSteps.get(selectedStep.id)}
+              status={status.filter((line) => line.stepRunId === selectedStep.id)}
               context={stepContext}
               now={now}
               onClose={() => setSelectedNodeId(undefined)}
@@ -179,7 +181,7 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
                 <strong style={{ fontSize: 16 }}>{live ? "Live feed" : "Feed"}</strong>
                 <span style={{ fontSize: 12, color: theme.textMuted }}>Everything every agent did, in order</span>
               </div>
-              <RunFeed entries={feed} live={live} agentLabel={stepLabel} onSelectStep={selectStep} />
+              <RunFeed entries={feed} live={live} agentLabel={stepLabel} onSelectStep={selectStep} status={status} />
             </>
           )}
         </div>

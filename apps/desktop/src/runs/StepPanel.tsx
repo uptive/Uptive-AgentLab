@@ -6,7 +6,7 @@ import { ActivityBlockView } from "./ActivityView.js";
 import { formatMs, formatUsd, stepLatencyMs } from "./format.js";
 import { ReadableValue } from "./ReadableValue.js";
 import { RunFeed } from "./RunFeed.js";
-import type { FeedEntry } from "./feedEntries.js";
+import type { FeedEntry, LiveStatus } from "./feedEntries.js";
 import { StatusBadge } from "./runUi.js";
 
 export function Metric({ label, value, size = 18 }: { label: string; value: string; size?: number }) {
@@ -74,20 +74,27 @@ interface Props {
   /** This step's part of the run feed. */
   feed: FeedEntry[];
   live: LiveStep | undefined;
+  /** This agent's live status line, if it is working or waiting. */
+  status: LiveStatus[];
   context: { agentName: string; output: unknown }[];
   now: number;
   onClose: () => void;
 }
 
 /** Everything about one agent in a run: its numbers, result and a live feed of what it does. */
-export function StepPanel({ step, agent, label, feed, live, context, now, onClose }: Props) {
+export function StepPanel({ step, agent, label, feed, live, status, context, now, onClose }: Props) {
   const usage = step.usage;
   const running = step.status === "running";
   const latencyMs = usage?.latencyMs ?? stepLatencyMs(step, now);
   // Final usage once the step is done; while it runs, the token counts streamed so far.
   const inputTokens = usage?.inputTokens ?? live?.inputTokens;
   const outputTokens = usage?.outputTokens ?? live?.outputTokens;
-  const hasActivity = feed.some((entry) => entry.kind === "activity");
+  // The final answer is shown in its own box, so drop the text block that repeats it.
+  const answer = typeof step.output === "string" ? step.output.trim() : undefined;
+  const activity = answer
+    ? feed.filter((entry) => !(entry.kind === "activity" && entry.block.kind === "text" && entry.block.text.trim() === answer))
+    : feed;
+  const hasActivity = activity.some((entry) => entry.kind === "activity");
 
   return (
     <div>
@@ -130,11 +137,11 @@ export function StepPanel({ step, agent, label, feed, live, context, now, onClos
         </p>
       ) : (
         <>
-          <FinalAnswer step={step} />
+          {running ? null : <FinalAnswer step={step} />}
           <SectionLabel>{running ? "Live activity" : "What the agent did"}</SectionLabel>
           {hasActivity || step.toolCalls.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", maxHeight: 520 }}>
-              <RunFeed entries={feed} live={running} />
+            <div style={{ display: "flex", flexDirection: "column", maxHeight: running ? 640 : 520 }}>
+              <RunFeed entries={activity} live={running} status={status} expandTools />
             </div>
           ) : (
             // Older runs only kept their tool calls on the step.
@@ -151,6 +158,7 @@ export function StepPanel({ step, agent, label, feed, live, context, now, onClos
                     output: call.output,
                     durationMs: new Date(call.completedAt).getTime() - new Date(call.startedAt).getTime(),
                   }}
+                  expanded
                 />
               ))}
             </div>

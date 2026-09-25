@@ -35,6 +35,8 @@ export interface ActivityBlock {
   output?: unknown;
   failed?: boolean;
   durationMs?: number;
+  /** When the block started: received time for live blocks, event time for recorded ones. */
+  at?: string;
 }
 
 export interface LiveStep {
@@ -54,9 +56,10 @@ function applyChunks(chunks: AgentStreamChunk[]) {
     // Immutable updates so useSyncExternalStore sees a new snapshot.
     let next: LiveStep;
     if (chunk.type === "block") {
-      next = { ...prev, blocks: [...prev.blocks, { kind: chunk.block, text: "", toolName: chunk.toolName, toolUseId: chunk.toolUseId }] };
+      const block: ActivityBlock = { kind: chunk.block, text: "", toolName: chunk.toolName, toolUseId: chunk.toolUseId, at: new Date().toISOString() };
+      next = { ...prev, blocks: [...prev.blocks, block] };
     } else if (chunk.type === "delta") {
-      const blocks = prev.blocks.length ? [...prev.blocks] : [{ kind: "text" as const, text: "" }];
+      const blocks = prev.blocks.length ? [...prev.blocks] : [{ kind: "text" as const, text: "", at: new Date().toISOString() }];
       const last = blocks[blocks.length - 1];
       blocks[blocks.length - 1] = { ...last, text: last.text + chunk.text };
       next = { ...prev, blocks };
@@ -157,8 +160,8 @@ export function eventBlocks(event: TraceEvent): ActivityBlock[] {
   if (event.type === "model_call") {
     const data = event.data as ModelCallData;
     const blocks: ActivityBlock[] = [];
-    if (data.thinking) blocks.push({ kind: "thinking", text: data.thinking });
-    if (data.text) blocks.push({ kind: "text", text: data.text });
+    if (data.thinking) blocks.push({ kind: "thinking", text: data.thinking, at: event.timestamp });
+    if (data.text) blocks.push({ kind: "text", text: data.text, at: event.timestamp });
     return blocks;
   }
   if (event.type === "tool_call") {
@@ -174,6 +177,7 @@ export function eventBlocks(event: TraceEvent): ActivityBlock[] {
         output: data.output,
         failed: data.status === "failed",
         durationMs: data.durationMs,
+        at: event.timestamp,
       },
     ];
   }
