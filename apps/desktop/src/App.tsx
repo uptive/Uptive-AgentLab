@@ -11,6 +11,7 @@ import { NotificationsView } from "./notifications/NotificationsView.js";
 import { notificationsBridge, requestOpenRun } from "./notifications/bridge.js";
 import { Banner } from "./ui/Banner.js";
 import { theme, useTheme } from "./theme.js";
+import { useActiveRunCount } from "./runs/runUi.js";
 
 const TABS = [
   { id: "agents", label: "Agents", view: AgentsView, fullBleed: false },
@@ -62,6 +63,7 @@ export function App() {
 
   const { view: ActiveView, fullBleed } = TABS.find((tab) => tab.id === activeTab)!;
   const { mode, toggle } = useTheme();
+  const activeRuns = useActiveRunCount();
 
   return (
     <div style={{ display: "flex", height: "100vh", background: theme.pageBg, color: theme.text }}>
@@ -94,6 +96,22 @@ export function App() {
             }}
           >
             {tab.label}
+            {tab.id === "runs" && activeRuns > 0 ? (
+              <span
+                title={`${activeRuns} running`}
+                style={{
+                  marginLeft: 8,
+                  padding: "0 7px",
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: theme.warning,
+                  color: theme.onStatus,
+                }}
+              >
+                ● {activeRuns}
+              </span>
+            ) : null}
           </button>
         ))}
         <AuthStatus />

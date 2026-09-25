@@ -165,10 +165,10 @@ describe("createClaudeAgentRuntime", () => {
     expect(events.find((e) => e.type === "model_call")?.data).toMatchObject({ thinking: "Hmm, read it." });
   });
 
-  it("does not ask for adaptive thinking on models without it", async () => {
+  it("asks for summarized budget thinking on models without adaptive thinking", async () => {
     const { runtime, seen } = await setup([success()]);
     await runtime.run({ ...agent, tools: [], model: "claude-haiku-4-5" }, "x", context);
-    expect(seen.options?.thinking).toBeUndefined();
+    expect(seen.options?.thinking).toEqual({ type: "enabled", display: "summarized" });
   });
 
   it("returns structured output when the agent has an output schema", async () => {
