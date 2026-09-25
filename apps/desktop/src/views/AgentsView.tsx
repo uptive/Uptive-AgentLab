@@ -6,6 +6,7 @@ import { PROMOTION_SUMMARY, promotionConfirmText } from "../agentPromotion.js";
 import { alpha, theme } from "../theme.js";
 import { SkillPicker, ToolPicker } from "../library/ToolPicker.js";
 import { useLibrary } from "../library/useLibrary.js";
+import { AgentTestPanel } from "./AgentTestPanel.js";
 
 const MODELS = MODEL_CATALOG.map((m) => m.id);
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -1054,6 +1055,13 @@ export function AgentsView() {
                   <StatInput label="Max tokens per run" min={1} step={1} value={form.limitMaxTokens} onChange={set("limitMaxTokens")} />
                   <StatInput label="Max cost" unit="USD" min={0} step={0.01} value={form.limitMaxCostUsd} onChange={set("limitMaxCostUsd")} />
                 </div>
+              </Section>
+
+              <Section title="Test">
+                <AgentTestPanel
+                  resetKey={editing?.id ?? "new"}
+                  buildAgent={() => ({ ...toInput(form, editing ?? undefined), id: editing?.id ?? "draft-agent" })}
+                />
               </Section>
             </div>
 

@@ -16,6 +16,10 @@ const agents: AgentLabApi["agents"] = {
   delete: (id: string) => ipcRenderer.invoke("agents:delete", id),
   promote: (id: string) => ipcRenderer.invoke("agents:promote", id),
   draft: (request: AgentDraftRequest) => ipcRenderer.invoke("agents:draft", request),
+  test: (request) => ipcRenderer.invoke(IPC.testAgent, request),
+  cancelTest: (testId) => ipcRenderer.invoke(IPC.cancelAgentTest, testId),
+  onTestStream: (listener) => subscribe(IPC.agentTestStream, listener),
+  judge: (request) => ipcRenderer.invoke(IPC.judgeAgent, request),
 };
 
 const cloudFlows: FlowStore = {
