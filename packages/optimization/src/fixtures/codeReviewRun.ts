@@ -1,9 +1,9 @@
 // Fixture: a completed run of `Planner → [Code Reviewer || Security Reviewer] → Final Validator`.
 // Stand-in until Group 1 (agents) and Group 3 (runs) have real data. Built on the shared contracts.
 //
-// Assumed input-mapping convention (to confirm with Group 2 / flow-engine):
-//   "$input.<field>"          → field of the run's initial input
-//   "<nodeId>.output.<path>"  → field of an upstream node's output
+// Input mappings use the flow engine's format (see `buildNodeInput` in @agentlab/flow-engine):
+//   "$input.<field>"    → field of the run's initial input
+//   "<nodeId>.<path>"   → field of an upstream node's output ("<nodeId>" for the whole output)
 //
 // Deliberate problems baked in for the evaluators to find:
 //   - Planner runs on a strong, expensive model for a small structured-planning step.
@@ -186,13 +186,13 @@ export const fixtureFlow: FlowDefinition = {
       id: "code-review",
       agentId: "code-reviewer",
       dependsOn: ["plan"],
-      inputMapping: { diff: "$input.diff", plan: "plan.output" },
+      inputMapping: { diff: "$input.diff", plan: "plan" },
     },
     {
       id: "security-review",
       agentId: "security-reviewer",
       dependsOn: ["code-review"],
-      inputMapping: { diff: "$input.diff", plan: "plan.output" },
+      inputMapping: { diff: "$input.diff", plan: "plan" },
     },
     {
       id: "validate",
@@ -201,8 +201,8 @@ export const fixtureFlow: FlowDefinition = {
       inputMapping: {
         task: "$input.task",
         diff: "$input.diff",
-        codeFindings: "code-review.output.findings",
-        securityFindings: "security-review.output.findings",
+        codeFindings: "code-review.findings",
+        securityFindings: "security-review.findings",
       },
     },
   ],

@@ -10,13 +10,14 @@ import type {
   McpServerDefinition,
   McpServerInput,
   Run,
+  RunTrial,
   SkillDefinition,
   TraceEvent,
   Usage,
 } from "@agentlab/contracts";
 import type { ClaudeAuthStatus, McpTestResult } from "@agentlab/agent-runtime/claude";
-import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
-import type { JsonRequest } from "@agentlab/optimization";
+import type { AsyncTelemetryStore, PersistedState, RunListing } from "@agentlab/observability";
+import type { JsonRequest, JsonResponse } from "@agentlab/optimization";
 import type { NotificationSettings } from "./notificationSettings.js";
 import type { OptimizationSummary, RunOutcome } from "./notificationState.js";
 
@@ -46,6 +47,13 @@ export interface StartRunRequest {
   input: unknown;
   /** A folder agents may read (e.g. the repository a review flow looks at). */
   folder?: string;
+  /**
+   * Agents to run instead of the saved ones with the same id. Used to test suggested changes on
+   * copies without saving them.
+   */
+  agents?: AgentDefinition[];
+  /** Marks the run as a test of suggested changes. */
+  trial?: RunTrial;
 }
 
 /** An unsaved agent run once from the editor. Not saved to Runs. */
@@ -333,6 +341,11 @@ export interface AgentLabApi {
     load(): Promise<PersistedState | null>;
     save(state: PersistedState): Promise<void>;
   };
+  /** Runs saved to the shared MongoDB before runs moved to local files. Read-only. */
+  sharedRuns: {
+    list(): Promise<RunListing[]>;
+    get(runId: string): Promise<{ run: Run; events: TraceEvent[] } | undefined>;
+  };
   /** Real flow runs, executed by the Claude runtime in the main process. */
   runs: {
     /** Resolves as soon as the run has started. Progress arrives through onUpdate/onEvent. */
@@ -393,7 +406,8 @@ export interface AgentLabApi {
   };
   /** Model calls for LLM-backed evaluators; run in the main process so API credentials stay there. */
   optimization: {
-    generateJson(request: JsonRequest): Promise<unknown>;
+    /** The model's JSON answer plus the tokens, cost and time the call used. */
+    generateJson(request: JsonRequest): Promise<JsonResponse>;
   };
 }
 
@@ -406,6 +420,8 @@ export const IPC = {
   readFlow: "flows:read",
   writeFlow: "flows:write",
   listCloudFlows: "cloudFlows:list",
+  listSharedRuns: "sharedRuns:list",
+  getSharedRun: "sharedRuns:get",
   getCloudFlow: "cloudFlows:get",
   saveCloudFlow: "cloudFlows:save",
   deleteCloudFlow: "cloudFlows:delete",

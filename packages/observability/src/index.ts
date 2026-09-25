@@ -13,6 +13,16 @@ export interface RunPersistenceAdapter {
   save(state: PersistedState): Promise<void>;
 }
 
+/** A run as listed, without its steps, inputs or outputs. */
+export interface RunListing {
+  id: string;
+  flowId: string;
+  flowName?: string;
+  status: Run["status"];
+  startedAt: string;
+  completedAt?: string;
+}
+
 export type StoreListener = () => void;
 
 // Sync telemetry store used by the desktop renderer. React's useSyncExternalStore

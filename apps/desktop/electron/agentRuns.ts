@@ -134,15 +134,17 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
   /** Starts a flow run; resolves with its id once the engine has created it. */
   async function startFlowRun(request: StartRunRequest): Promise<{ runId: string }> {
     await recovered;
-    const { flow, input, folder } = request;
+    const { flow, input, folder, trial } = request;
     if (folder && !(await stat(folder).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${folder}`);
     const agents = await resolveAgents(flow);
+    // A test of suggested changes runs edited copies; the saved agents are left as they are.
+    for (const agent of request.agents ?? []) agents.set(agent.id, agent);
     const missing = flow.nodes.filter((n) => !agents.has(n.agentId)).map((n) => n.agentId);
     if (missing.length > 0) throw new Error(`Unknown agents in this flow: ${[...new Set(missing)].join(", ")}`);
 
     const controller = new AbortController();
     let authSource: AuthSource | undefined;
-    const snapshot = { flow, agents: [...agents.values()], input };
+    const snapshot = { flow, agents: [...agents.values()], input, ...(trial ? { trial } : {}) };
     const batcher = createStreamBatcher((chunks) => broadcast(IPC.runStream, chunks));
     // Stream chunks go first so the live view never lags behind the trace events.
     const sendEvent = (event: TraceEvent) => {

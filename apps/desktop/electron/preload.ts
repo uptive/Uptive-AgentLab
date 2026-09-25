@@ -92,6 +92,10 @@ const api: AgentLabApi = {
     run: (agent, input, context) => ipcRenderer.invoke(IPC.runAgent, agent, input, context),
   },
   telemetry,
+  sharedRuns: {
+    list: () => ipcRenderer.invoke(IPC.listSharedRuns),
+    get: (runId) => ipcRenderer.invoke(IPC.getSharedRun, runId),
+  },
   runs: {
     start: (request) => ipcRenderer.invoke(IPC.startRun, request),
     cancel: (runId) => ipcRenderer.invoke(IPC.cancelRun, runId),
