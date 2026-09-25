@@ -9,6 +9,7 @@ import { RunGraph } from "../runs/RunGraph.js";
 import { singleAgentFlow, startRun, stopRun } from "../runs/runLauncher.js";
 import { buildActivity, canRunForReal, connectLiveRuns, useLiveStep } from "../liveRuns.js";
 import { ActivityView } from "../runs/ActivityView.js";
+import { clearOpenRunRequest, useOpenRunRequest } from "../notifications/bridge.js";
 import { JsonView } from "../runs/JsonView.js";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
@@ -763,6 +764,14 @@ export function RunsView() {
   const [newRunOpen, setNewRunOpen] = useState(false);
 
   const resolveAgent = useCallback((agentId: string) => catalog.agentsById.get(agentId), [catalog]);
+
+  // Opened from a notification or the tray.
+  const openRequest = useOpenRunRequest();
+  useEffect(() => {
+    if (!openRequest) return;
+    setSelectedRunId(openRequest.runId);
+    clearOpenRunRequest();
+  }, [openRequest]);
 
   const handleStart = useCallback(
     async (flow: FlowDefinition, input: unknown, folder?: string) => {

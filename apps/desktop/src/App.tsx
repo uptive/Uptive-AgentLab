@@ -7,6 +7,9 @@ import { LibraryView } from "./views/LibraryView.js";
 import { AuthStatus } from "./AuthStatus.js";
 import { McpView } from "./views/McpView.js";
 import { SetupView } from "./views/SetupView.js";
+import { NotificationsView } from "./notifications/NotificationsView.js";
+import { notificationsBridge, requestOpenRun } from "./notifications/bridge.js";
+import { Banner } from "./ui/Banner.js";
 import { theme, useTheme } from "./theme.js";
 
 const TABS = [
@@ -17,6 +20,7 @@ const TABS = [
   { id: "library", label: "Tools & skills", view: LibraryView, fullBleed: false },
   { id: "mcp", label: "MCP", view: McpView, fullBleed: false },
   { id: "setup", label: "Setup", view: SetupView, fullBleed: false },
+  { id: "notifications", label: "Notifications", view: NotificationsView, fullBleed: false },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -33,6 +37,29 @@ export function App() {
     window.addEventListener("agentlab:navigate", onNavigate);
     return () => window.removeEventListener("agentlab:navigate", onNavigate);
   }, []);
+  // A notification or tray item was clicked: main holds what to open until the app asks for it.
+  const [openError, setOpenError] = useState<string>();
+  useEffect(() => {
+    const bridge = notificationsBridge();
+    if (!bridge) return;
+    let cancelled = false;
+    const take = () =>
+      bridge
+        .takeOpenTarget()
+        .then((target) => {
+          if (cancelled || !target) return;
+          if (target.view === "runs") requestOpenRun(target.runId);
+          setActiveTab(target.view);
+        })
+        .catch((error: Error) => setOpenError(`Could not open what the notification pointed to: ${error.message}`));
+    void take();
+    const unsubscribe = bridge.onOpen(() => void take());
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
   const { view: ActiveView, fullBleed } = TABS.find((tab) => tab.id === activeTab)!;
   const { mode, toggle } = useTheme();
 
@@ -87,6 +114,7 @@ export function App() {
         </button>
       </nav>
       <main style={{ flex: 1, minWidth: 0, padding: fullBleed ? 0 : 24, overflow: fullBleed ? "hidden" : "auto" }}>
+        {openError ? <Banner tone="error" onDismiss={() => setOpenError(undefined)}>{openError}</Banner> : null}
         <ActiveView />
       </main>
     </div>

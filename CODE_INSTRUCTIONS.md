@@ -50,6 +50,11 @@ Baseline at review time: `pnpm typecheck` passes and 71 unit tests pass (agent-r
 - Unsaved edits are never discarded silently. Switching tabs, Escape or a backdrop click must check dirty state.
 - Modals use the native `<dialog>` element via the shared `<Modal>`.
 
+### Notifications
+- Anything that tells the user about finished work (system notifications, badge, tray, Slack) goes through `RunNotifier` in the main process. Read `docs/notifications.md` first.
+- Callers report what happened (`notifier.runFinished`, `reportOptimizationFinished`). They never check focus or settings, and never create `new Notification(...)` themselves.
+- Notifications fire only while the window is unfocused, and never contain run input, output or secrets.
+
 ### Demo, mock and fixture code
 - Fixtures and mocks live in `test/` or a `./testing` subpath export, **never** in a package's root `index.ts`.
 - Demo data only appears behind `import.meta.env.DEV` or in browser-preview mode (no bridge), and is **never** written to persisted stores.
@@ -97,7 +102,6 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 - `maxCostUsd: 0` is ignored (truthy check). `claude/options.ts:146`.
 - Skill names aren't validated before `path.join`, so a name can escape the folder. `runtime.ts:75-84`. **Fix:** reuse `SKILL_NAME` from `library.ts:8` (move it to contracts).
 - `runs:start` can hang forever if the run emits no update. `apps/desktop/electron/agentRuns.ts:105-127`.
-- Flow runs and SDK child processes aren't aborted on quit. `agentRuns.ts:52`, `main.ts:465`. **Fix:** a `dispose()` called from `before-quit`.
 - `startRun` gives agents access to any folder the renderer names. `agentRuns.ts:83,97`. **Fix:** accept only paths returned by `pickFolder`.
 
 **Mongo stores**
