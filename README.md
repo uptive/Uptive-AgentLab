@@ -2,6 +2,55 @@
 
 AI Agent Control Center — a desktop tool to build, orchestrate, run, observe and improve AI agent flows. See `AI_Workshop.docx` for the full brief.
 
+## Install AgentLab
+
+Every push to `main` publishes a new release for macOS (Apple Silicon) and Windows (x64). Install it from a terminal. Run the same command again to update.
+
+**macOS**, in Terminal:
+
+```bash
+curl -fsSL https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.sh | bash
+```
+
+**Windows**, in PowerShell:
+
+```powershell
+irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex
+```
+
+**Windows**, in Command Prompt:
+
+```bat
+powershell -NoProfile -Command "irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex"
+```
+
+The script downloads the latest release, installs it and starts AgentLab:
+
+- **macOS:** `AgentLab.app` goes into `/Applications`, or `~/Applications` if you can't write to `/Applications`.
+- **Windows:** AgentLab is installed for your user only, in `%LOCALAPPDATA%\Programs\AgentLab`, without an installer window.
+
+**MongoDB.** On the first install the script asks for the MongoDB connection string. The input is hidden, and you can leave it empty. It's saved to AgentLab's own `.env`:
+
+- macOS: `~/Library/Application Support/AgentLab/.env`
+- Windows: `%APPDATA%\AgentLab\.env`
+
+To skip the prompt, set `MONGODB_URI` before running the command. Without a connection string, local agents and runs still work; shared agents and flows need one. To add or change it later, edit that file (`MONGODB_URI=…`) and restart AgentLab.
+
+**Private repository.** While the repository is private, the download needs the [GitHub CLI](https://cli.github.com), logged in with an account that can see it (`gh auth login`). The scripts use it automatically when it is logged in.
+
+**Uninstall.**
+
+- macOS: delete `AgentLab.app`, and `~/Library/Application Support/AgentLab` to remove your data too.
+- Windows: *Settings → Apps → AgentLab → Uninstall*, and delete `%APPDATA%\AgentLab` to remove your data too.
+
+**Troubleshooting.**
+
+- **macOS says the app "can't be opened" or is "damaged":** the app isn't notarized yet, so a zip downloaded in a browser is blocked. Install with the command above, which isn't affected.
+- **Windows shows a SmartScreen warning:** the installer isn't code-signed yet. The script's silent install avoids it. If you double-click the installer, choose *More info → Run anyway*.
+- **Intel Macs and Windows on ARM** aren't built yet.
+
+How releases are built: `docs/releasing.md`.
+
 ## Structure
 
 pnpm workspace monorepo:
@@ -93,7 +142,7 @@ requests, and only runs flows and agents that are already saved.
 pnpm typecheck
 ```
 
-## Package the desktop app
+## Package the desktop app locally
 
 ```bash
 pnpm --filter @agentlab/desktop package:mac   # -> apps/desktop/release

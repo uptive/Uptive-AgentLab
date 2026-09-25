@@ -14,6 +14,7 @@ Baseline at review time: `pnpm typecheck` passes and 71 unit tests pass (agent-r
 - Keep PRs small and about one thing. Merge `main` into your branch before opening the PR, not after.
 - Before pushing: `pnpm typecheck && pnpm lint && pnpm test` must pass (this becomes CI; see Part 3).
 - Never commit secrets, `.env` files, synced data (`data/agents/`), `dist*/` output or `.claude/worktrees/`.
+- Never bake secrets into a build, including ones from GitHub Actions secrets: anything in the app bundle is readable by every user. Credentials reach the app at install or run time (see `docs/releasing.md`).
 
 ### TypeScript
 - `strict` stays on. Don't use `any` or `@ts-ignore`. Avoid `!` non-null assertions and `as X` casts; narrow the type instead.
@@ -173,14 +174,9 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 - Shared validators in contracts: skill name, server id, node id (no `.`, not `$input`).
 - Document whether `maxTokens` counts cache reads. Optionally add a flow-level budget enforced by the executor.
 
-### P3 — Packaging (blocks shipping a `.dmg`/`.exe`)
+### P3 — Packaging (see `docs/releasing.md`)
 
-- No `extraResources` for the Claude binary, which `agentRuns.ts:24` expects; the referenced copy script doesn't exist.
-- No `asarUnpack` for `@anthropic-ai/claude-agent-sdk`, so the binary can't be executed from inside the asar.
-- `.env` is read from inside the asar (`main.ts:66`); `data/local-agents` resolves inside the read-only bundle (`main.ts:118`); `repoRoot` doesn't exist when packaged (`main.ts:355`). Move all of these into `paths.ts` using `app.isPackaged ? userData : repo`.
-- pnpm symlinks vs electron-builder: add `.npmrc` with `node-linker=hoisted` or verify the output.
 - No CSP in `index.html`, and fonts are loaded from Google at runtime; bundle them.
-- The `pnpm.onlyBuiltDependencies` field in `package.json` is ignored by current pnpm (the warning shows on every command). It's already covered by `allowBuilds` in `pnpm-workspace.yaml`, so remove it.
 
 ### P3 — Small stuff
 - Fixture-specific checklist text sits in a production heuristic. `optimization/src/evaluators/quality.ts:174-178`.

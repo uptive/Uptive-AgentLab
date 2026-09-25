@@ -1,0 +1,83 @@
+# Builds the desktop app on every push to main and publishes it as a GitHub release, with the
+# install scripts attached. See docs/releasing.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm -r run test
+
+  build:
+    needs: check
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14 # Apple Silicon
+            script: package:mac
+          - os: windows-latest
+            script: package:win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Set version
+        shell: bash
+        run: npm pkg set version="0.1.${{ github.run_number }}" --prefix apps/desktop
+      - name: Package
+        run: pnpm --filter @agentlab/desktop run ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.os }}
+          path: |
+            apps/desktop/release/AgentLab-mac-*.zip
+            apps/desktop/release/AgentLab-win-*-setup.exe
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v0.1.${{ github.run_number }}"
+          gh release create "$tag" dist/* scripts/install.sh scripts/install.ps1 \
+            --target "${{ github.sha }}" \
+            --title "AgentLab $tag" \
+            --generate-notes \
+            --latest
