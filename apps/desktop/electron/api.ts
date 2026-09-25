@@ -13,10 +13,13 @@ import type {
   RunTrial,
   SkillDefinition,
   TraceEvent,
+  Usage,
 } from "@agentlab/contracts";
 import type { ClaudeAuthStatus, McpTestResult } from "@agentlab/agent-runtime/claude";
 import type { AsyncTelemetryStore, PersistedState, RunListing } from "@agentlab/observability";
 import type { JsonRequest, JsonResponse } from "@agentlab/optimization";
+import type { NotificationSettings } from "./notificationSettings.js";
+import type { OptimizationSummary, RunOutcome } from "./notificationState.js";
 
 /** A flow file registered in the editor configuration. */
 export interface ProjectEntry {
@@ -51,6 +54,46 @@ export interface StartRunRequest {
   agents?: AgentDefinition[];
   /** Marks the run as a test of suggested changes. */
   trial?: RunTrial;
+}
+
+/** An unsaved agent run once from the editor. Not saved to Runs. */
+export interface AgentTestRequest {
+  /** Chosen by the caller so it can match stream chunks (runId and stepRunId both equal it). */
+  testId: string;
+  agent: AgentDefinition;
+  input: unknown;
+}
+
+/** "no-schema" = nothing to check against, "bad-schema" = the schema itself does not compile. */
+export interface SchemaCheck {
+  status: "valid" | "invalid" | "no-schema" | "bad-schema" | "skipped";
+  errors: string[];
+}
+
+export interface AgentTestResult {
+  status: "completed" | "failed" | "cancelled";
+  output: unknown;
+  error?: string;
+  usage: Usage;
+  toolCallCount: number;
+  inputCheck: SchemaCheck;
+  /** "skipped" when the run did not complete. */
+  outputCheck: SchemaCheck;
+}
+
+export interface AgentJudgeRequest {
+  agent: AgentDefinition;
+  input: unknown;
+  output: unknown;
+}
+
+/** Claude's grade of one test output against the agent's instructions. */
+export interface AgentJudgement {
+  /** 1 (unusable) to 5 (fully meets the instructions). */
+  score: number;
+  verdict: string;
+  strengths: string[];
+  issues: string[];
 }
 
 /** A server in the app's MCP library (see McpServerEntry for servers listed from other apps' configs). */
@@ -216,6 +259,32 @@ export interface ToolRun {
   cancel(): Promise<boolean>;
 }
 
+export type { NotificationSettings, OptimizationSummary, RunOutcome };
+
+export interface NotificationStatus {
+  settings: NotificationSettings;
+  /** False on systems where the OS offers no notifications. */
+  supported: boolean;
+  webhookConfigured: boolean;
+  /** Why the last webhook post failed; cleared by the next one that succeeds. */
+  webhookError?: string;
+  /** Set when the settings file exists but could not be read. */
+  settingsError?: string;
+  /** Why the custom sound last failed to play (the system beep was used instead). */
+  soundError?: string;
+}
+
+export type WebhookTestResult = { status: "sent" } | { status: "not-configured" } | { status: "failed"; error: string };
+
+export interface NotificationTestResult {
+  /** False when the OS does not support notifications. */
+  notificationShown: boolean;
+  webhook: WebhookTestResult;
+}
+
+/** Where a notification or tray click sends the user. */
+export type OpenTarget = { view: "runs"; runId?: string } | { view: "optimize" };
+
 export interface AgentLabApi {
   projects: {
     list(): Promise<ProjectsState>;
@@ -236,6 +305,13 @@ export interface AgentLabApi {
   agents: AgentsApi & {
     /** Asks the claude CLI to map a description into agent fields. Nothing is saved. */
     draft(request: AgentDraftRequest): Promise<AgentDraft>;
+    /** Runs an agent definition (saved or not) once with the real runtime. Not saved to Runs. */
+    test(request: AgentTestRequest): Promise<AgentTestResult>;
+    cancelTest(testId: string): Promise<void>;
+    /** Live token output of running tests, in batches. */
+    onTestStream(listener: (chunks: AgentStreamChunk[]) => void): () => void;
+    /** Asks Claude to score a test output. One extra model call. */
+    judge(request: AgentJudgeRequest): Promise<AgentJudgement>;
   };
   /** Flows saved to MongoDB. Independent of the local file flows above — not synced with them. */
   cloudFlows: FlowStore;
@@ -285,8 +361,6 @@ export interface AgentLabApi {
   };
   claude: {
     authStatus(refresh?: boolean): Promise<ClaudeAuthStatus>;
-    /** Agents that are always available to flows, in addition to saved agents. */
-    builtinAgents(): Promise<AgentDefinition[]>;
   };
   skills: {
     list(): Promise<SkillDefinition[]>;
@@ -307,6 +381,28 @@ export interface AgentLabApi {
   mcp: {
     /** MCP servers configured for Claude Desktop, Claude Code, plugins, this repo and Cursor. Read-only. */
     list(): Promise<McpSource[]>;
+  };
+  /** Run notifications, the tray icon and the Slack webhook. Everything is decided in the main process. */
+  notifications: {
+    status(): Promise<NotificationStatus>;
+    save(settings: NotificationSettings): Promise<NotificationStatus>;
+    /** null removes the stored URL. */
+    setWebhookUrl(url: string | null): Promise<NotificationStatus>;
+    /** Shows a sample notification and posts a sample message to the webhook, if one is set. */
+    sendTest(): Promise<NotificationTestResult>;
+    /** Opens a file dialog for the notification sound. Cancelling leaves it unchanged. */
+    pickSoundFile(): Promise<NotificationStatus>;
+    /** Goes back to the system sound. */
+    clearSoundFile(): Promise<NotificationStatus>;
+    /** Plays the chosen sound file once; rejects when it cannot be played. */
+    previewSound(): Promise<void>;
+    onStatus(listener: (status: NotificationStatus) => void): () => void;
+    /** Reports a finished Optimize analysis; main notifies only if the window is unfocused. */
+    optimizationFinished(summary: OptimizationSummary): Promise<void>;
+    /** Main asks the window to open something (a notification or tray item was clicked); call takeOpenTarget. */
+    onOpen(listener: () => void): () => void;
+    /** What the user asked to open, once; undefined when there is nothing. */
+    takeOpenTarget(): Promise<OpenTarget | undefined>;
   };
   /** Model calls for LLM-backed evaluators; run in the main process so API credentials stay there. */
   optimization: {
@@ -337,7 +433,6 @@ export const IPC = {
   runStream: "runs:stream",
   pickFolder: "runs:pick-folder",
   authStatus: "claude:auth-status",
-  builtinAgents: "claude:builtin-agents",
   listSkills: "skills:list",
   saveSkill: "skills:save",
   deleteSkill: "skills:delete",
@@ -358,4 +453,21 @@ export const IPC = {
   /** main -> renderer: `{ runId, stream, chunk }` for runs started with a runId. */
   toolOutput: "tools:output",
   runAgent: "runtime:run",
+  testAgent: "agents:test",
+  cancelAgentTest: "agents:test-cancel",
+  agentTestStream: "agents:test-stream",
+  judgeAgent: "agents:judge",
+  getNotificationStatus: "notifications:getStatus",
+  saveNotificationSettings: "notifications:saveSettings",
+  setNotificationWebhook: "notifications:setWebhookUrl",
+  sendTestNotification: "notifications:sendTest",
+  pickNotificationSound: "notifications:pickSoundFile",
+  clearNotificationSound: "notifications:clearSoundFile",
+  previewNotificationSound: "notifications:previewSound",
+  notifyOptimization: "notifications:optimizationFinished",
+  takeOpenTarget: "notifications:takeOpenTarget",
+  /** main -> renderer: NotificationStatus after any change. */
+  notificationStatus: "notifications:status",
+  /** main -> renderer: no payload; the renderer calls takeOpenTarget. */
+  openTarget: "notifications:open",
 } as const;

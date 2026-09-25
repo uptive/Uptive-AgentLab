@@ -31,6 +31,7 @@ import { RecommendationDrawer } from "../optimize/RecommendationDrawer.js";
 import { createModelClient, type ModelCallRecord } from "../optimize/modelClient.js";
 import { RawDataDrawer } from "../optimize/RawDataDrawer.js";
 import { runSource, type RunSummary } from "../optimize/runSource.js";
+import { reportOptimizationFinished } from "../notifications/bridge.js";
 import "./OptimizeView.css";
 
 const DEFAULT_MODEL_KEY = "agentlab.optimize.defaultModel";
@@ -165,6 +166,14 @@ export function OptimizeView() {
       setAnalyses(results);
       setResult(shown.evaluation);
       setAnalyzedWith(shown.modelId);
+      // Main shows a notification only if the user switched to another app while this ran.
+      const evaluation = shown.evaluation!;
+      reportOptimizationFinished({
+        flowName: loaded.flow.name,
+        recommendations: evaluation.recommendations.length,
+        highSeverity: evaluation.recommendations.filter((r) => r.severity === "high").length,
+        savedUsdPerRun: evaluation.summary.baseline.costUsd - evaluation.summary.projected.costUsd,
+      }).catch((e: Error) => setError(`The analysis finished, but the notification could not be sent: ${e.message}`));
     } catch (e) {
       setResult(undefined);
       setError(e instanceof Error ? e.message : String(e));

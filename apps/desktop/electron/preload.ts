@@ -16,6 +16,10 @@ const agents: AgentLabApi["agents"] = {
   delete: (id: string) => ipcRenderer.invoke("agents:delete", id),
   promote: (id: string) => ipcRenderer.invoke("agents:promote", id),
   draft: (request: AgentDraftRequest) => ipcRenderer.invoke("agents:draft", request),
+  test: (request) => ipcRenderer.invoke(IPC.testAgent, request),
+  cancelTest: (testId) => ipcRenderer.invoke(IPC.cancelAgentTest, testId),
+  onTestStream: (listener) => subscribe(IPC.agentTestStream, listener),
+  judge: (request) => ipcRenderer.invoke(IPC.judgeAgent, request),
 };
 
 const cloudFlows: FlowStore = {
@@ -102,7 +106,6 @@ const api: AgentLabApi = {
   },
   claude: {
     authStatus: (refresh) => ipcRenderer.invoke(IPC.authStatus, refresh),
-    builtinAgents: () => ipcRenderer.invoke(IPC.builtinAgents),
   },
   skills: {
     list: () => ipcRenderer.invoke(IPC.listSkills),
@@ -121,6 +124,19 @@ const api: AgentLabApi = {
   mcp: { list: () => ipcRenderer.invoke(IPC.listMcp) },
   optimization: {
     generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),
+  },
+  notifications: {
+    status: () => ipcRenderer.invoke(IPC.getNotificationStatus),
+    save: (settings) => ipcRenderer.invoke(IPC.saveNotificationSettings, settings),
+    setWebhookUrl: (url) => ipcRenderer.invoke(IPC.setNotificationWebhook, url),
+    sendTest: () => ipcRenderer.invoke(IPC.sendTestNotification),
+    pickSoundFile: () => ipcRenderer.invoke(IPC.pickNotificationSound),
+    clearSoundFile: () => ipcRenderer.invoke(IPC.clearNotificationSound),
+    previewSound: () => ipcRenderer.invoke(IPC.previewNotificationSound),
+    onStatus: (listener) => subscribe(IPC.notificationStatus, listener),
+    optimizationFinished: (summary) => ipcRenderer.invoke(IPC.notifyOptimization, summary),
+    onOpen: (listener) => subscribe(IPC.openTarget, listener),
+    takeOpenTarget: () => ipcRenderer.invoke(IPC.takeOpenTarget),
   },
 };
 

@@ -155,9 +155,11 @@ export function buildBaseOptions(input: BaseOptionsInput): Options {
     abortController: input.abortController,
     maxTurns,
     ...(effort ? { effort } : {}),
-    // Token-level streaming for the live view, with readable thinking summaries where supported.
+    // Token-level streaming for the live view, with readable thinking summaries. Without `display`,
+    // Claude Code still thinks on older models (Haiku 4.5) but streams the blocks with empty text.
+    // Older models keep Claude Code's default thinking budget.
     includePartialMessages: true,
-    ...(supportsAdaptiveThinking(agent.model) ? { thinking: { type: "adaptive", display: "summarized" } } : {}),
+    thinking: supportsAdaptiveThinking(agent.model) ? { type: "adaptive", display: "summarized" } : { type: "enabled", display: "summarized" },
     ...(agent.limits?.maxCostUsd ? { maxBudgetUsd: agent.limits.maxCostUsd } : {}),
     ...(agent.outputSchema && typeof agent.outputSchema === "object"
       ? { outputFormat: { type: "json_schema", schema: agent.outputSchema as Record<string, unknown> } }

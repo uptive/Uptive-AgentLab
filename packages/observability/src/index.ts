@@ -86,6 +86,8 @@ export function createTelemetryStore(options: CreateTelemetryStoreOptions = {}):
   const runs = new Map<string, Run>();
   const events: TraceEvent[] = [];
   const eventsByRunId = new Map<string, TraceEvent[]>();
+  // Live events can arrive before hydrate() loads the same ones from disk; index each id once.
+  const eventIds = new Set<string>();
   const listeners = new Set<StoreListener>();
 
   // React's useSyncExternalStore requires getSnapshot to return a stable
@@ -142,7 +144,10 @@ export function createTelemetryStore(options: CreateTelemetryStoreOptions = {}):
     }, writeDebounceMs);
   }
 
-  function indexEvent(event: TraceEvent): void {
+  /** Returns false when the event was already indexed. */
+  function indexEvent(event: TraceEvent): boolean {
+    if (eventIds.has(event.id)) return false;
+    eventIds.add(event.id);
     events.push(event);
     const bucket = eventsByRunId.get(event.runId);
     if (bucket) {
@@ -151,11 +156,12 @@ export function createTelemetryStore(options: CreateTelemetryStoreOptions = {}):
       eventsByRunId.set(event.runId, [event]);
     }
     eventsSnapshotByRunId.delete(event.runId);
+    return true;
   }
 
   return {
     recordEvent(event: TraceEvent): void {
-      indexEvent(event);
+      if (!indexEvent(event)) return;
       schedulePersist();
       notify();
     },
@@ -201,7 +207,8 @@ export function createTelemetryStore(options: CreateTelemetryStoreOptions = {}):
           );
           return;
         }
-        for (const run of loaded.runs) runs.set(run.id, run);
+        // A run already in memory came live from this session and is newer than the persisted copy.
+        for (const run of loaded.runs) if (!runs.has(run.id)) runs.set(run.id, run);
         for (const event of loaded.events) indexEvent(event);
         runsSnapshot = undefined;
         notify();
@@ -289,4 +296,22 @@ export function summarizeRun(run: Run, events?: TraceEvent[]): RunSummary {
 
 export function getStepRun(run: Run, stepRunId: string): StepRun | undefined {
   return run.steps.find((step) => step.id === stepRunId);
+}
+
+/**
+ * Closes out a run that can no longer progress (stopped by the user, crashed, or interrupted by a
+ * quit): the run and every step still pending or running become failed with `reason`. Steps that
+ * already finished keep their status, output, `completedAt` and `error`.
+ */
+export function interruptRun(run: Run, reason: string, at = new Date().toISOString()): Run {
+  return {
+    ...run,
+    status: "failed",
+    completedAt: run.completedAt ?? at,
+    steps: run.steps.map((step) =>
+      step.status === "running" || step.status === "pending"
+        ? { ...step, status: "failed", completedAt: step.completedAt ?? at, error: step.error ?? reason }
+        : step,
+    ),
+  };
 }

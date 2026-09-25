@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AgentDefinition, FlowDefinition } from "@agentlab/contracts";
-import { demoAgents } from "@agentlab/agent-runtime";
-import { demoFlow, dummyAgents, parseFlow } from "@agentlab/flow-engine";
+import { parseFlow } from "@agentlab/flow-engine";
 import type { AgentLabApi } from "../../electron/api.js";
 
-// Absent in a plain browser preview; the catalog then falls back to the built-in demo data.
+// Absent in a plain browser preview; the catalog is then empty.
 const bridge = (): AgentLabApi | undefined => (window as { agentlab?: AgentLabApi }).agentlab;
 
 export interface FlowOption {
@@ -20,11 +19,7 @@ export interface Catalog {
   loading: boolean;
 }
 
-/**
- * Everything a run can be started from: the demo flow plus the flows saved in
- * projects, and every known agent. Stored agents win over the built-in placeholders
- * (which the flow editor's palette and the demo runs still reference by id).
- */
+/** Everything a run can be started from: the flows saved in projects or MongoDB, and the stored agents. */
 export function useCatalog(): Catalog {
   const [projectFlows, setProjectFlows] = useState<FlowOption[]>([]);
   const [storedAgents, setStoredAgents] = useState<AgentDefinition[]>([]);
@@ -69,12 +64,7 @@ export function useCatalog(): Catalog {
   }, []);
 
   return useMemo(() => {
-    const agentsById = new Map<string, AgentDefinition>();
-    for (const agent of [...dummyAgents, ...demoAgents, ...storedAgents]) agentsById.set(agent.id, agent);
-    const flows = [
-      { flow: demoFlow, source: "demo" },
-      ...projectFlows.filter((option) => option.flow.id !== demoFlow.id),
-    ];
-    return { flows, agents: Array.from(agentsById.values()), agentsById, loading };
+    const agentsById = new Map(storedAgents.map((agent) => [agent.id, agent]));
+    return { flows: projectFlows, agents: Array.from(agentsById.values()), agentsById, loading };
   }, [projectFlows, storedAgents, loading]);
 }

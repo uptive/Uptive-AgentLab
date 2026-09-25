@@ -1,5 +1,5 @@
 import type { AgentDefinition, FlowDefinition, Run } from "@agentlab/contracts";
-import { getTelemetryStore } from "@agentlab/observability";
+import { getTelemetryStore, interruptRun } from "@agentlab/observability";
 import { createFlowEngine, createMockRuntime } from "@agentlab/flow-engine";
 import { canRunForReal, connectLiveRuns } from "../liveRuns.js";
 
@@ -97,7 +97,8 @@ function startMockRun(
  * is marked failed. Also works for runs left "running" by a previous session.
  */
 export function stopRun(run: Run): void {
-  // Real runs carry agent snapshots; the main process aborts them and publishes the final state.
+  // Real runs carry agent snapshots. The main process aborts them, or closes them out if they are no
+  // longer running there, and publishes the final state.
   if (run.agents && canRunForReal()) {
     void window.agentlab.runs.cancel(run.id);
     if (run.status === "running") return;
@@ -108,15 +109,5 @@ export function stopRun(run: Run): void {
     entry.controller.abort();
     active.delete(run.id);
   }
-  const now = new Date().toISOString();
-  getTelemetryStore().saveRun({
-    ...run,
-    status: "failed",
-    completedAt: now,
-    steps: run.steps.map((step) =>
-      step.status === "running" || step.status === "pending"
-        ? { ...step, status: "failed", completedAt: step.completedAt ?? now, error: step.error ?? "Cancelled by user" }
-        : step,
-    ),
-  });
+  getTelemetryStore().saveRun(interruptRun(run, "Cancelled by user"));
 }
