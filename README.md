@@ -66,13 +66,21 @@ This starts Vite + Electron with hot reload.
 
 The desktop app can host a local MCP server, so Claude Code in this repo can list your saved flows
 and start runs. Runs execute in the app, so you can follow them live under **Runs**, where they are
-marked "from Claude Code". The server is off unless you set a token.
+marked "from Claude Code". The server is off until you set up a token.
 
-1. Make a token: `openssl rand -hex 32`.
-2. Add `AGENTLAB_MCP_TOKEN=<token>` to the root `.env`. You can also set `AGENTLAB_MCP_PORT` (default `4780`).
-3. Export the same value in the shell you start Claude Code from: `export AGENTLAB_MCP_TOKEN=<token>`.
-4. Start the app (`pnpm dev:desktop`), then start `claude` in the repo and approve the `agentlab` server from `.mcp.json`.
-5. Ask something like "list the AgentLab flows and run Review with topic X".
+Each person sets this up once on their own machine:
+
+1. Run `pnpm mcp:setup`. It creates a random token in `~/.agentlab/mcp-token`, readable only by you.
+   The token never goes in the repo, `.env` or your shell, and it only works on your machine.
+2. Start (or restart) the app with `pnpm dev:desktop`. The log shows `[claude-code] bridge listening on …`.
+3. Start `claude` in the repo and approve the `agentlab` server from `.mcp.json`. Claude Code gets the
+   token by running `scripts/agentlab-mcp.mjs headers` (the `headersHelper`), so there is nothing to export.
+4. Ask something like "list the AgentLab flows and run Review with topic X".
+
+If `/mcp` shows the server as failed: a refused connection means the app isn't running (or
+`AGENTLAB_MCP_PORT` differs between the app's `.env` and your shell); a 401 means the app was started
+before the token existed, so restart it. To get a new token, delete `~/.agentlab/mcp-token`, run
+`pnpm mcp:setup` again and restart the app.
 
 The tools are `list_flows`, `get_flow` (steps and the input schema), `start_run`, `list_agents`,
 `get_agent`, `start_agent_run` (one agent as a one-step flow), `get_run` (with `waitSeconds` to wait

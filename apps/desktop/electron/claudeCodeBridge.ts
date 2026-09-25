@@ -64,7 +64,7 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 export function startClaudeCodeBridge(deps: ClaudeCodeBridgeDeps, options: ClaudeCodeBridgeOptions): Promise<ClaudeCodeBridge> {
   if (options.token.length < MIN_TOKEN_LENGTH) {
-    return Promise.reject(new Error(`AGENTLAB_MCP_TOKEN must be at least ${MIN_TOKEN_LENGTH} characters`));
+    return Promise.reject(new Error(`The bridge token must be at least ${MIN_TOKEN_LENGTH} characters`));
   }
   const expected = Buffer.from(`Bearer ${options.token}`);
   // Runs started through the bridge, so get_run can wait for them to finish.

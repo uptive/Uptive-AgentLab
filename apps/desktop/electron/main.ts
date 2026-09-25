@@ -44,7 +44,8 @@ import { claudeBinaryPath, registerAgentRunIpc, type AgentRuns } from "./agentRu
 import { LocalToolRegistry } from "./localTools.js";
 import { listMcpSources } from "./mcpConfig.js";
 import { judgeAgentOutput } from "./agentTest.js";
-import { startClaudeCodeBridge, type BridgeAgentSummary, type BridgeFlowSummary, type ClaudeCodeBridge, type FlowSource } from "./claudeCodeBridge.js";
+import { bridgeTokenPath, readBridgeToken } from "./bridgeToken.js";
+import { startClaudeCodeBridge,type BridgeAgentSummary, type BridgeFlowSummary, type ClaudeCodeBridge, type FlowSource } from "./claudeCodeBridge.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -453,34 +454,36 @@ async function getBridgeFlow(store: EditorConfigStore, id: string, source: FlowS
 
 let bridge: Promise<ClaudeCodeBridge | undefined> = Promise.resolve(undefined);
 
-/** Starts the Claude Code bridge when AGENTLAB_MCP_TOKEN is set; it stays off otherwise. */
+/** Starts the Claude Code bridge once `pnpm mcp:setup` has made this machine's token; it stays off otherwise. */
 function startBridge(store: EditorConfigStore, runs: AgentRuns, telemetry: AsyncTelemetryStore) {
-  const token = process.env.AGENTLAB_MCP_TOKEN;
-  if (!token) return;
   const port = Number(process.env.AGENTLAB_MCP_PORT || DEFAULT_BRIDGE_PORT);
-  bridge = startClaudeCodeBridge(
-    {
-      listFlows: () => listBridgeFlows(store),
-      getFlow: (id, source) => getBridgeFlow(store, id, source),
-      listAgents: listBridgeAgents,
-      getAgent: async (id) => {
-        const [agents] = await agentStoreFor(id);
-        return agents.get(id);
-      },
-      runs,
-      telemetry,
-    },
-    { port, token },
-  ).then(
-    (started) => {
+  bridge = readBridgeToken()
+    .then(async (token) => {
+      if (!token) {
+        console.log(`[claude-code] bridge off: no token at ${bridgeTokenPath()} (run \`pnpm mcp:setup\`)`);
+        return undefined;
+      }
+      const started = await startClaudeCodeBridge(
+        {
+          listFlows: () => listBridgeFlows(store),
+          getFlow: (id, source) => getBridgeFlow(store, id, source),
+          listAgents: listBridgeAgents,
+          getAgent: async (id) => {
+            const [agents] = await agentStoreFor(id);
+            return agents.get(id);
+          },
+          runs,
+          telemetry,
+        },
+        { port, token },
+      );
       console.log(`[claude-code] bridge listening on ${started.url}`);
       return started;
-    },
-    (error) => {
+    })
+    .catch((error) => {
       console.error("[claude-code] bridge not started:", (error as Error).message);
       return undefined;
-    },
-  );
+    });
 }
 
 // Packaged builds get their icon from electron-builder; dev runs need it set explicitly.

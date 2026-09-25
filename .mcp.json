@@ -3,9 +3,7 @@
     "agentlab": {
       "type": "http",
       "url": "http://127.0.0.1:${AGENTLAB_MCP_PORT:-4780}/mcp",
-      "headers": {
-        "Authorization": "Bearer ${AGENTLAB_MCP_TOKEN}"
-      }
+      "headersHelper": "node scripts/agentlab-mcp.mjs headers"
     }
   }
 }
