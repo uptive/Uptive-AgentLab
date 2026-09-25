@@ -133,7 +133,7 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 
 **2.6 Split the big views** into feature folders (see Part 3):
 - `AgentsView.tsx` (1091 lines) → `useAgents`, `useAgentForm`, `AgentDrawer`, `DraftPreview`, `AgentCard`
-- `RunsView.tsx` (379 lines; still holds `NewRunDialog`, move it to `runs/`) and `OptimizeView.tsx` (831 lines) → their existing `runs/` and `optimize/` folders
+- `RunsView.tsx` (452 lines; still holds `NewRunDialog`, move it to `runs/`) and `OptimizeView.tsx` (831 lines) → their existing `runs/` and `optimize/` folders
 
 **2.7 Deduplicate frontend helpers:**
 - The IPC error cleaner exists 5 times: `AgentsView:132`, `useLibrary:8`, `flow-editor/bridge:10`, `optimize/modelClient:15`, `RunsView:509`.
