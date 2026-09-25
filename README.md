@@ -2,6 +2,55 @@
 
 AI Agent Control Center — a desktop tool to build, orchestrate, run, observe and improve AI agent flows. See `AI_Workshop.docx` for the full brief.
 
+## Install AgentLab
+
+Every push to `main` publishes a new release for macOS (Apple Silicon) and Windows (x64). Install it from a terminal. Run the same command again to update.
+
+**macOS**, in Terminal:
+
+```bash
+curl -fsSL https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.sh | bash
+```
+
+**Windows**, in PowerShell:
+
+```powershell
+irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex
+```
+
+**Windows**, in Command Prompt:
+
+```bat
+powershell -NoProfile -Command "irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex"
+```
+
+The script downloads the latest release, installs it and starts AgentLab:
+
+- **macOS:** `AgentLab.app` goes into `/Applications`, or `~/Applications` if you can't write to `/Applications`.
+- **Windows:** AgentLab is installed for your user only, in `%LOCALAPPDATA%\Programs\AgentLab`, without an installer window.
+
+**MongoDB.** On the first install the script asks for the MongoDB connection string. The input is hidden, and you can leave it empty. It's saved to AgentLab's own `.env`:
+
+- macOS: `~/Library/Application Support/AgentLab/.env`
+- Windows: `%APPDATA%\AgentLab\.env`
+
+To skip the prompt, set `MONGODB_URI` before running the command. Without a connection string, local agents and runs still work; shared agents and flows need one. To add or change it later, edit that file (`MONGODB_URI=…`) and restart AgentLab.
+
+**Private repository.** While the repository is private, the download needs the [GitHub CLI](https://cli.github.com), logged in with an account that can see it (`gh auth login`). The scripts use it automatically when it is logged in.
+
+**Uninstall.**
+
+- macOS: delete `AgentLab.app`, and `~/Library/Application Support/AgentLab` to remove your data too.
+- Windows: *Settings → Apps → AgentLab → Uninstall*, and delete `%APPDATA%\AgentLab` to remove your data too.
+
+**Troubleshooting.**
+
+- **macOS says the app "can't be opened" or is "damaged":** the app isn't notarized yet, so a zip downloaded in a browser is blocked. Install with the command above, which isn't affected.
+- **Windows shows a SmartScreen warning:** the installer isn't code-signed yet. The script's silent install avoids it. If you double-click the installer, choose *More info → Run anyway*.
+- **Intel Macs and Windows on ARM** aren't built yet.
+
+How releases are built: `docs/releasing.md`.
+
 ## Structure
 
 pnpm workspace monorepo:
@@ -62,27 +111,36 @@ pnpm dev:desktop
 
 This starts Vite + Electron with hot reload.
 
+## Run flows from Claude Code
+
+The desktop app can host a local MCP server, so Claude Code in this repo can list your saved flows
+and start runs. Runs execute in the app, so you can follow them live under **Runs**, where they are
+marked "from Claude Code". The server is off until you set up a token.
+
+Each person sets this up once on their own machine:
+
+1. Run `pnpm mcp:setup`. It creates a random token in `~/.agentlab/mcp-token`, readable only by you.
+   The token never goes in the repo, `.env` or your shell, and it only works on your machine.
+2. Start (or restart) the app with `pnpm dev:desktop`. The log shows `[claude-code] bridge listening on …`.
+3. Start `claude` in the repo and approve the `agentlab` server from `.mcp.json`. Claude Code gets the
+   token by running `scripts/agentlab-mcp.mjs headers` (the `headersHelper`), so there is nothing to export.
+4. Ask something like "list the AgentLab flows and run Review with topic X".
+
+If `/mcp` shows the server as failed: a refused connection means the app isn't running (or
+`AGENTLAB_MCP_PORT` differs between the app's `.env` and your shell); a 401 means the app was started
+before the token existed, so restart it. To get a new token, delete `~/.agentlab/mcp-token`, run
+`pnpm mcp:setup` again and restart the app.
+
+The tools are `list_flows`, `get_flow` (steps and the input schema), `start_run`, `list_agents`,
+`get_agent`, `start_agent_run` (one agent as a one-step flow), `get_run` (with `waitSeconds` to wait
+for the result), `cancel_run` and `list_runs`. The server only listens on 127.0.0.1, rejects browser
+requests, and only runs flows and agents that are already saved.
+
 ## Typecheck everything
 
 ```bash
 pnpm typecheck
 ```
-
-## Install the desktop app
-
-Every push to `main` publishes a release. Install or update from a terminal:
-
-```bash
-# macOS (Apple Silicon)
-curl -fsSL https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.sh | bash
-```
-
-```powershell
-# Windows (PowerShell)
-irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex
-```
-
-See `docs/releasing.md` for Command Prompt, how the pipeline works, and packaging details.
 
 ## Package the desktop app locally
 

@@ -16,13 +16,14 @@ import {
   type Run,
   type TraceEvent,
 } from "@agentlab/contracts";
-import type { PersistedState } from "@agentlab/observability";
+import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createFileTelemetryStore } from "@agentlab/observability/file";
 import { createMongoRunReader, type MongoRunReader } from "@agentlab/observability/mongo";
 import { createMongoAgentStore, createMongoRoleStore, type MongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
 import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
+import { parseFlow } from "@agentlab/flow-engine";
 import type { JsonRequest, JsonResponse } from "@agentlab/optimization";
 import { createModelClient } from "@agentlab/optimization/models";
 import { generateAgentDraft } from "./agentDraft.js";
@@ -40,10 +41,12 @@ import {
   type ToolRunRequest,
 } from "./api.js";
 import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
-import { claudeBinaryPath, registerAgentRunIpc } from "./agentRuns.js";
+import { claudeBinaryPath, registerAgentRunIpc, type AgentRuns } from "./agentRuns.js";
 import { LocalToolRegistry } from "./localTools.js";
 import { listMcpSources } from "./mcpConfig.js";
 import { judgeAgentOutput } from "./agentTest.js";
+import { bridgeTokenPath, readBridgeToken } from "./bridgeToken.js";
+import { startClaudeCodeBridge, type BridgeAgentSummary, type BridgeFlowSummary, type ClaudeCodeBridge, type FlowSource } from "./claudeCodeBridge.js";
 import { createHandle } from "./ipcHandle.js";
 import { NotificationSettingsStore } from "./notificationSettings.js";
 import { RunNotifier } from "./notifications.js";
@@ -182,6 +185,9 @@ async function listRoles(): Promise<string[]> {
 
 // Telemetry payload guard for the load/save bridge used by the renderer's RunPersistenceAdapter.
 const MAX_TELEMETRY_BYTES = 25 * 1024 * 1024;
+
+/** Local port for the Claude Code bridge; override with AGENTLAB_MCP_PORT (keep .mcp.json in sync). */
+const DEFAULT_BRIDGE_PORT = 4780;
 
 const JSON_FILTERS = [{ name: "Flow definition", extensions: ["json"] }];
 
@@ -373,6 +379,7 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry, secrets
     },
     dataDir: paths.dataDir(),
   });
+  startBridge(store, runs, telemetry);
 
   ipcMain.handle(IPC.listMcp, () =>
     listMcpSources({ appDataDir: app.getPath("appData"), repoRoot: paths.repoRoot() }),
@@ -436,6 +443,82 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry, secrets
   });
 
   return runs;
+}
+
+/** Saved flows from MongoDB and registered flow files, for the Claude Code bridge. */
+async function listBridgeFlows(store: EditorConfigStore): Promise<{ flows: BridgeFlowSummary[]; errors: string[] }> {
+  const errors: string[] = [];
+  const files = (await store.state()).flows.flatMap((entry): BridgeFlowSummary[] =>
+    entry.status === "ok" && entry.id && entry.name
+      ? [{ id: entry.id, name: entry.name, description: entry.description, tags: entry.tags, source: "file", nodeCount: entry.nodeCount ?? 0 }]
+      : [],
+  );
+  let database: BridgeFlowSummary[] = [];
+  try {
+    database = (await (await getStores()).flows.list()).map((f) => ({
+      id: f.id,
+      name: f.name,
+      description: f.description,
+      tags: f.tags,
+      source: "database",
+      nodeCount: f.nodes.length,
+    }));
+  } catch (error) {
+    errors.push(`MongoDB: ${(error as Error).message}`);
+  }
+  return { flows: [...database, ...files], errors };
+}
+
+/** Saved agents from the local folder and MongoDB, for the Claude Code bridge. */
+async function listBridgeAgents(): Promise<{ agents: BridgeAgentSummary[]; errors: string[] }> {
+  const summarize = (a: AgentDefinition): BridgeAgentSummary => ({ id: a.id, name: a.name, description: a.description, role: a.role, model: a.model });
+  await localAgentsLoaded;
+  const local = (await localAgents.list()).map(summarize);
+  try {
+    return { agents: [...local, ...(await (await getStores()).agents.list()).map(summarize)], errors: [] };
+  } catch (error) {
+    return { agents: local, errors: [`MongoDB: ${(error as Error).message}`] };
+  }
+}
+
+async function getBridgeFlow(store: EditorConfigStore, id: string, source: FlowSource): Promise<FlowDefinition | undefined> {
+  if (source === "database") return (await getStores()).flows.get(id);
+  const entry = (await store.state()).flows.find((f) => f.status === "ok" && f.id === id);
+  return entry ? parseFlow(await readFile(entry.filePath, "utf8")) : undefined;
+}
+
+let bridge: Promise<ClaudeCodeBridge | undefined> = Promise.resolve(undefined);
+
+/** Starts the Claude Code bridge once `pnpm mcp:setup` has made this machine's token; it stays off otherwise. */
+function startBridge(store: EditorConfigStore, runs: AgentRuns, telemetry: AsyncTelemetryStore) {
+  const port = Number(process.env.AGENTLAB_MCP_PORT || DEFAULT_BRIDGE_PORT);
+  bridge = readBridgeToken()
+    .then(async (token) => {
+      if (!token) {
+        console.log(`[claude-code] bridge off: no token at ${bridgeTokenPath()} (run \`pnpm mcp:setup\`)`);
+        return undefined;
+      }
+      const started = await startClaudeCodeBridge(
+        {
+          listFlows: () => listBridgeFlows(store),
+          getFlow: (id, source) => getBridgeFlow(store, id, source),
+          listAgents: listBridgeAgents,
+          getAgent: async (id) => {
+            const [agents] = await agentStoreFor(id);
+            return agents.get(id);
+          },
+          runs,
+          telemetry,
+        },
+        { port, token },
+      );
+      console.log(`[claude-code] bridge listening on ${started.url}`);
+      return started;
+    })
+    .catch((error) => {
+      console.error("[claude-code] bridge not started:", (error as Error).message);
+      return undefined;
+    });
 }
 
 // Packaged builds get their icon from electron-builder; dev runs need it set explicitly.
@@ -516,7 +599,7 @@ app.whenReady().then(() => {
     secrets,
     getWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined),
     showWindow: () => showWindow(runNotifier),
-    stopRun: (runId) => runs?.cancelRun(runId),
+    stopRun: (runId) => void runs?.cancelRun(runId).catch((error: Error) => console.warn("[runs] could not stop run:", error.message)),
     rerun: (run) => (runs ? runs.rerun(run) : Promise.reject(new Error("Runs are not available yet"))),
   });
   notifier = runNotifier;
@@ -576,5 +659,6 @@ app.on("before-quit", (event) => {
   runs?.dispose();
   notifier?.dispose();
   tools.dispose();
+  void bridge.then((b) => b?.close()).catch((error) => console.warn("[claude-code] could not close bridge:", error.message));
   stores?.then(({ client }) => client.close()).catch(() => {});
 });

@@ -8,6 +8,7 @@
   "scripts": {
     "build": "pnpm -r --filter=./packages/* run build",
     "dev:desktop": "pnpm --filter @agentlab/desktop dev",
+    "mcp:setup": "node scripts/agentlab-mcp.mjs setup",
     "typecheck": "pnpm -r run typecheck",
     "clean": "pnpm -r run clean"
   },

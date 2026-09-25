@@ -18,15 +18,7 @@ interface ActiveRun {
 // Module-level so runs keep going when the Runs view unmounts (e.g. switching tabs).
 const active = new Map<string, ActiveRun>();
 
-/** Wraps a single agent in a one-node flow so it can go through the same engine and views. */
-export function singleAgentFlow(agent: AgentDefinition): FlowDefinition {
-  return {
-    id: `agent:${agent.id}`,
-    name: agent.name,
-    description: `Single-agent run of ${agent.name}`,
-    nodes: [{ id: agent.id, agentId: agent.id, dependsOn: [] }],
-  };
-}
+export { singleAgentFlow } from "@agentlab/contracts";
 
 /**
  * Starts executing `flow` in the background and resolves with the new run's id. Every
