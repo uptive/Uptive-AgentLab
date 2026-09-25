@@ -24,6 +24,14 @@ function Cursor() {
 
 function Thinking({ block, streaming }: { block: ActivityBlock; streaming: boolean }) {
   const [open, setOpen] = useState(true);
+  // Some models think without sharing their reasoning; say so instead of showing an empty box.
+  if (!block.text.trim()) {
+    return (
+      <div style={{ borderLeft: `2px solid ${theme.border}`, paddingLeft: 10, ...labelStyle }}>
+        {streaming ? "Thinking…" : "Thought without sharing its reasoning"}
+      </div>
+    );
+  }
   return (
     <div style={{ borderLeft: `2px solid ${theme.border}`, paddingLeft: 10 }}>
       <button type="button" onClick={() => setOpen((v) => !v)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", ...labelStyle }}>
