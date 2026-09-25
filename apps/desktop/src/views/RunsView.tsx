@@ -9,8 +9,9 @@ import { canRunForReal, connectLiveRuns } from "../liveRuns.js";
 import { RunDetail } from "../runs/RunDetail.js";
 import { LiveRuns } from "../runs/LiveRuns.js";
 import { RunHistory } from "../runs/RunHistory.js";
-import { countActiveRuns } from "../runs/runLists.js";
+import { activeRuns, countActiveRuns } from "../runs/runLists.js";
 import { buttonStyle, fieldStyle, resolveRunFlow, resolveRunInput, useRuns } from "../runs/runUi.js";
+import { clearOpenRunRequest, useOpenRunRequest } from "../notifications/bridge.js";
 import { InputForm } from "../runs/InputForm.js";
 import { buildInputForm, collectInput, firstAgent, formValuesFromInput, type FormObject } from "../runs/inputSchemaForm.js";
 
@@ -343,6 +344,18 @@ export function RunsView() {
   const activeCount = countActiveRuns(runs);
 
   const resolveAgent = useCallback((agentId: string) => catalog.agentsById.get(agentId), [catalog]);
+
+  // Opened from a notification or the tray: a run opens on the tab it belongs to (so Back returns
+  // there), and a digest ("3 runs finished") opens the history.
+  const openRequest = useOpenRunRequest();
+  useEffect(() => {
+    if (!openRequest) return;
+    const { runId } = openRequest;
+    const live = runId !== undefined && activeRuns(store.listRuns()).some((run) => run.id === runId);
+    setTab(live ? "live" : "history");
+    setSelectedRunId(runId);
+    clearOpenRunRequest();
+  }, [openRequest, store]);
 
   const handleStart = useCallback(
     async (flow: FlowDefinition, input: unknown, folder?: string) => {

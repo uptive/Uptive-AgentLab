@@ -121,6 +121,19 @@ const api: AgentLabApi = {
   optimization: {
     generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),
   },
+  notifications: {
+    status: () => ipcRenderer.invoke(IPC.getNotificationStatus),
+    save: (settings) => ipcRenderer.invoke(IPC.saveNotificationSettings, settings),
+    setWebhookUrl: (url) => ipcRenderer.invoke(IPC.setNotificationWebhook, url),
+    sendTest: () => ipcRenderer.invoke(IPC.sendTestNotification),
+    pickSoundFile: () => ipcRenderer.invoke(IPC.pickNotificationSound),
+    clearSoundFile: () => ipcRenderer.invoke(IPC.clearNotificationSound),
+    previewSound: () => ipcRenderer.invoke(IPC.previewNotificationSound),
+    onStatus: (listener) => subscribe(IPC.notificationStatus, listener),
+    optimizationFinished: (summary) => ipcRenderer.invoke(IPC.notifyOptimization, summary),
+    onOpen: (listener) => subscribe(IPC.openTarget, listener),
+    takeOpenTarget: () => ipcRenderer.invoke(IPC.takeOpenTarget),
+  },
 };
 
 contextBridge.exposeInMainWorld("agentlab", api);

@@ -24,7 +24,8 @@
     "ajv": "^8.20.0",
     "mongodb": "^6.21.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
@@ -52,7 +53,10 @@
     ],
     "mac": {
       "target": "dmg",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "NSUserNotificationAlertStyle": "alert"
+      }
     },
     "win": {
       "target": "nsis",
