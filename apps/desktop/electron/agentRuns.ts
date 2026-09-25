@@ -4,11 +4,10 @@ import { cp, readdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AgentDefinition, AgentStreamChunk, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
-import { demoAgents } from "@agentlab/agent-runtime";
 import type { AsyncTelemetryStore } from "@agentlab/observability";
 import { createClaudeAgentRuntime, createClaudeCodeJsonClient, getClaudeAuthStatus, testMcpServer, type ClaudeAuthStatus } from "@agentlab/agent-runtime/claude";
 import { createMcpServerFileStore, createSkillFileStore, parseSkillFile } from "@agentlab/agent-runtime/library";
-import { createFlowEngine, dummyAgents } from "@agentlab/flow-engine";
+import { createFlowEngine } from "@agentlab/flow-engine";
 import { IPC, type ImportResult, type LibraryMcpServer, type StartRunRequest } from "./api.js";
 import { SecretStore } from "./secrets.js";
 
@@ -82,22 +81,16 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
     for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(channel, payload);
   };
 
-  const builtinAgents = (): AgentDefinition[] => {
-    const ids = new Set(demoAgents.map((a) => a.id));
-    return [...demoAgents, ...dummyAgents.filter((a) => !ids.has(a.id))];
-  };
-
-  /** Saved agents win over built-in ones with the same id. */
+  /** Only saved agents run; a missing one fails the run instead of falling back to a placeholder. */
   async function resolveAgents(flow: FlowDefinition): Promise<Map<string, AgentDefinition>> {
     const resolved = new Map<string, AgentDefinition>();
-    const builtins = builtinAgents();
     for (const id of new Set(flow.nodes.map((n) => n.agentId))) {
       const saved = await deps.getAgent(id).catch((error) => {
-        console.warn(`[runs] could not look up agent ${id}, trying built-in agents:`, (error as Error).message);
+        console.warn(`[runs] could not look up agent ${id}, treating it as missing:`, (error as Error).message);
         return undefined;
       });
       // Listed agents carry a UI-only source tag; keep it out of run snapshots.
-      const { source: _source, ...agent } = (saved ?? builtins.find((a) => a.id === id) ?? {}) as AgentDefinition & { source?: string };
+      const { source: _source, ...agent } = (saved ?? {}) as AgentDefinition & { source?: string };
       if (agent.id) resolved.set(id, agent);
     }
     return resolved;
@@ -180,7 +173,6 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
     if (refresh || !authCache) authCache = getClaudeAuthStatus(inspectOptions);
     return authCache;
   });
-  ipcMain.handle(IPC.builtinAgents, async () => builtinAgents());
 
   // ---- Skills ------------------------------------------------------------------------------
   ipcMain.handle(IPC.listSkills, () => skills.list());

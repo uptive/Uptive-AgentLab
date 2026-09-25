@@ -115,7 +115,6 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 
 **Renderer**
 - Demo runs are seeded into the real persisted telemetry store on every mount. `apps/desktop/src/views/RunsView.tsx:708-728`.
-- Placeholder agents and `demoFlow` are in the production catalog, and `demoFlow` is the default in the new-run dialog, so real billed runs can start on dummy agents. `src/runs/catalog.ts:73-76`.
 - Switching tabs unmounts the view and discards unsaved flow edits or an analysis in progress. `src/App.tsx:36,90`.
 - Deletes without confirmation: `AgentsView.tsx:758,1072`, `LibraryView.tsx:250,269,350,369`.
 - Missing `.catch` handlers leave "Loading…" forever: `RunsView.tsx:651,710`, `OptimizeView.tsx:93`, `catalog.ts:48-60`.

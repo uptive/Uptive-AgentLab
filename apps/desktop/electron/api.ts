@@ -272,8 +272,6 @@ export interface AgentLabApi {
   };
   claude: {
     authStatus(refresh?: boolean): Promise<ClaudeAuthStatus>;
-    /** Agents that are always available to flows, in addition to saved agents. */
-    builtinAgents(): Promise<AgentDefinition[]>;
   };
   skills: {
     list(): Promise<SkillDefinition[]>;
@@ -321,7 +319,6 @@ export const IPC = {
   runStream: "runs:stream",
   pickFolder: "runs:pick-folder",
   authStatus: "claude:auth-status",
-  builtinAgents: "claude:builtin-agents",
   listSkills: "skills:list",
   saveSkill: "skills:save",
   deleteSkill: "skills:delete",

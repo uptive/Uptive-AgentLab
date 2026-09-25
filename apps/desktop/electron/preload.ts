@@ -98,7 +98,6 @@ const api: AgentLabApi = {
   },
   claude: {
     authStatus: (refresh) => ipcRenderer.invoke(IPC.authStatus, refresh),
-    builtinAgents: () => ipcRenderer.invoke(IPC.builtinAgents),
   },
   skills: {
     list: () => ipcRenderer.invoke(IPC.listSkills),

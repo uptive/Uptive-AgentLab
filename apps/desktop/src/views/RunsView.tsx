@@ -18,23 +18,6 @@ const STATUS_COLORS: Record<RunStatus, string> = {
   failed: theme.danger,
 };
 
-// The agents only see what is in the input (plus an optional folder), so the demo includes the diff.
-const DEFAULT_INPUT = JSON.stringify(
-  {
-    title: "Add user lookup endpoint",
-    description: "Adds findUser so support can look users up by name.",
-    diff: [
-      "diff --git a/src/users.ts b/src/users.ts",
-      "+export async function findUser(db, req) {",
-      "+  const name = req.query.name;",
-      "+  return db.query(\"SELECT * FROM users WHERE name = '\" + name + \"'\");",
-      "+}",
-    ].join("\n"),
-  },
-  null,
-  2,
-);
-
 function StatusBadge({ status }: { status: RunStatus }) {
   return (
     <span
@@ -529,6 +512,22 @@ function useRuns(): Run[] {
 
 type RunTarget = "flow" | "agent";
 
+/** Shown in place of a picker when nothing has been created yet. */
+function EmptyCatalog({ what, tab }: { what: string; tab: string }) {
+  return (
+    <div style={{ fontSize: 13, color: theme.textMuted }}>
+      No {what} yet.{" "}
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new CustomEvent("agentlab:navigate", { detail: tab }))}
+        style={{ background: "none", border: "none", padding: 0, color: theme.primary, cursor: "pointer", fontSize: 13 }}
+      >
+        Create one
+      </button>
+    </div>
+  );
+}
+
 function NewRunDialog({
   catalog,
   onCancel,
@@ -543,8 +542,14 @@ function NewRunDialog({
   const [target, setTarget] = useState<RunTarget>("flow");
   const [flowId, setFlowId] = useState<string>(catalog.flows[0]?.flow.id ?? "");
   const [agentId, setAgentId] = useState<string>(catalog.agents[0]?.id ?? "");
-  const [inputText, setInputText] = useState<string>(DEFAULT_INPUT);
+  const [inputText, setInputText] = useState<string>("");
   const [error, setError] = useState<string | undefined>(undefined);
+
+  // The catalog loads after the dialog opens, so pick the first entry once there is one.
+  useEffect(() => {
+    if (!catalog.flows.some((option) => option.flow.id === flowId)) setFlowId(catalog.flows[0]?.flow.id ?? "");
+    if (!catalog.agentsById.has(agentId)) setAgentId(catalog.agents[0]?.id ?? "");
+  }, [catalog, flowId, agentId]);
 
   const flow = catalog.flows.find((option) => option.flow.id === flowId)?.flow;
   const agent = catalog.agentsById.get(agentId);
@@ -643,30 +648,42 @@ function NewRunDialog({
         {target === "flow" ? (
           <>
             <label style={labelStyle}>Flow</label>
-            <select value={flowId} onChange={(e) => setFlowId(e.target.value)} style={fieldStyle}>
-              {catalog.flows.map((option) => (
-                <option key={option.flow.id} value={option.flow.id}>
-                  {option.flow.name} ({option.flow.nodes.length} steps · {option.source})
-                </option>
-              ))}
-            </select>
-            <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>
-              {catalog.loading ? "Loading project flows…" : flow?.description}
-            </div>
+            {catalog.loading || catalog.flows.length > 0 ? (
+              <>
+                <select value={flowId} onChange={(e) => setFlowId(e.target.value)} style={fieldStyle}>
+                  {catalog.flows.map((option) => (
+                    <option key={option.flow.id} value={option.flow.id}>
+                      {option.flow.name} ({option.flow.nodes.length} steps · {option.source})
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>
+                  {catalog.loading ? "Loading project flows…" : flow?.description}
+                </div>
+              </>
+            ) : (
+              <EmptyCatalog what="flows" tab="flows" />
+            )}
           </>
         ) : (
           <>
             <label style={labelStyle}>Agent</label>
-            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={fieldStyle}>
-              {catalog.agents.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name} ({option.model})
-                </option>
-              ))}
-            </select>
-            <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>
-              {catalog.loading ? "Loading agents…" : agent?.description ?? agent?.role}
-            </div>
+            {catalog.loading || catalog.agents.length > 0 ? (
+              <>
+                <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={fieldStyle}>
+                  {catalog.agents.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name} ({option.model})
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 6 }}>
+                  {catalog.loading ? "Loading agents…" : agent?.description ?? agent?.role}
+                </div>
+              </>
+            ) : (
+              <EmptyCatalog what="agents" tab="agents" />
+            )}
           </>
         )}
 
