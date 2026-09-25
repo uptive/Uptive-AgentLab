@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Run } from "@agentlab/contracts";
 import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
 import { theme } from "../theme.js";
@@ -58,6 +58,14 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>(undefined);
   const live = run.status === "running";
   const now = useNow(live);
+
+  // Escape leaves the full-width agent view and brings the flow back.
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSelectedNodeId(undefined);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedNodeId]);
   const summary = summarizeRun(run, events);
   const flow = resolveRunFlow(run, catalog);
   const agentName = (agentId: string) => catalog.agentsById.get(agentId)?.name ?? agentId;
@@ -135,22 +143,31 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
         ) : null}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 460px", gap: 16, flex: 1, minHeight: 480 }}>
-        <div style={{ position: "relative", borderRadius: 8, overflow: "hidden", border: `1px solid ${theme.border}` }}>
-          <RunGraph
-            flow={flow}
-            run={run}
-            agentsById={catalog.agentsById}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={setSelectedNodeId}
-            now={now}
-          />
-          {!selectedStep ? (
+      {/* A selected agent takes the full width; the graph comes back when it is closed. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: selectedStep ? "minmax(0, 1fr)" : "minmax(0, 1fr) 460px",
+          gap: 16,
+          flex: 1,
+          minHeight: 480,
+        }}
+      >
+        {selectedStep ? null : (
+          <div style={{ position: "relative", borderRadius: 8, overflow: "hidden", border: `1px solid ${theme.border}` }}>
+            <RunGraph
+              flow={flow}
+              run={run}
+              agentsById={catalog.agentsById}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={setSelectedNodeId}
+              now={now}
+            />
             <div style={{ position: "absolute", top: 10, left: 12, fontSize: 12, color: theme.textMuted, pointerEvents: "none" }}>
               Click an agent to see its own activity, tokens, cost and latency.
             </div>
-          ) : null}
-        </div>
+          </div>
+        )}
         <div
           style={{
             display: "flex",

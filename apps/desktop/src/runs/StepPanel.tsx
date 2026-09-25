@@ -110,15 +110,22 @@ export function StepPanel({ step, agent, label, feed, live, status, context, now
           <button
             type="button"
             onClick={onClose}
-            aria-label="Back to the run feed"
-            style={{ background: "none", border: "none", color: theme.textMuted, cursor: "pointer", fontSize: 14 }}
+            style={{
+              background: "none",
+              border: `1px solid ${theme.border}`,
+              borderRadius: 6,
+              padding: "4px 10px",
+              color: theme.textSecondary,
+              cursor: "pointer",
+              fontSize: 12,
+            }}
           >
-            ✕
+            ← Back to flow
           </button>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 16 }}>
         <Metric label={running ? "Latency (so far)" : "Latency"} value={formatMs(latencyMs)} size={16} />
         <Metric label="Cost" value={usage ? formatUsd(usage.estimatedCostUsd) : running ? "When finished" : "-"} size={16} />
         <Metric label={running ? "Input tokens (so far)" : "Input tokens"} value={inputTokens?.toLocaleString() ?? "-"} size={16} />
@@ -140,7 +147,7 @@ export function StepPanel({ step, agent, label, feed, live, status, context, now
           {running ? null : <FinalAnswer step={step} />}
           <SectionLabel>{running ? "Live activity" : "What the agent did"}</SectionLabel>
           {hasActivity || step.toolCalls.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", maxHeight: running ? 640 : 520 }}>
+            <div style={{ display: "flex", flexDirection: "column", maxHeight: "70vh" }}>
               <RunFeed entries={activity} live={running} status={status} expandTools />
             </div>
           ) : (
