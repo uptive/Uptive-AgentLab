@@ -70,16 +70,16 @@ pnpm typecheck
 
 ## Install the desktop app
 
-Every push to `main` publishes a release. With the [GitHub CLI](https://cli.github.com) logged in:
+Every push to `main` publishes a release. Install or update from a terminal:
 
 ```bash
 # macOS (Apple Silicon)
-gh release download -R uptive/Uptive-AgentLab -p install.sh -O - | bash
+curl -fsSL https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.sh | bash
 ```
 
 ```powershell
 # Windows (PowerShell)
-gh release download -R uptive/Uptive-AgentLab -p install.ps1 -O - | Out-String | Invoke-Expression
+irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex
 ```
 
 See `docs/releasing.md` for Command Prompt, how the pipeline works, and packaging details.

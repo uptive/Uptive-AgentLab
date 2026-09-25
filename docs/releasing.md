@@ -4,24 +4,24 @@ Every push to `main` builds the desktop app and publishes it as a GitHub release
 
 ## Install (for users)
 
-You need the [GitHub CLI](https://cli.github.com), logged in with an account that can see `uptive/Uptive-AgentLab` (`gh auth login`). The repository is private, so plain `curl` downloads don't work.
+Releases are public, so nothing but a terminal is needed. If the repository is made private again, the scripts fall back to the GitHub CLI (`gh auth login` with an account that can see it).
 
 **macOS (Apple Silicon)**, in Terminal:
 
 ```bash
-gh release download -R uptive/Uptive-AgentLab -p install.sh -O - | bash
+curl -fsSL https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.sh | bash
 ```
 
 **Windows**, in PowerShell:
 
 ```powershell
-gh release download -R uptive/Uptive-AgentLab -p install.ps1 -O - | Out-String | Invoke-Expression
+irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex
 ```
 
 or in Command Prompt:
 
 ```bat
-powershell -NoProfile -Command "gh release download -R uptive/Uptive-AgentLab -p install.ps1 -O - | Out-String | Invoke-Expression"
+powershell -NoProfile -Command "irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex"
 ```
 
 Run the same command again to update. The scripts:

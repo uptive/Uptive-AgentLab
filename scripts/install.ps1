@@ -1,12 +1,12 @@
 # Installs or updates AgentLab on Windows from the latest GitHub release.
 #
-#   gh release download -R uptive/Uptive-AgentLab -p install.ps1 -O - | Out-String | Invoke-Expression
+#   irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex
 #
-# From Command Prompt, wrap it: powershell -NoProfile -Command "gh release download -R uptive/Uptive-AgentLab -p install.ps1 -O - | Out-String | Invoke-Expression"
+# From Command Prompt: powershell -NoProfile -Command "irm https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.ps1 | iex"
 #
-# The repository is private, so the download goes through the GitHub CLI (`gh auth login` first).
+# Uses the GitHub CLI when it is logged in (needed if the repository is private), otherwise Invoke-WebRequest.
 # Set MONGODB_URI to skip the prompt for the connection string, and AGENTLAB_REPO to install from
-# another repository (e.g. a public releases repo, where plain Invoke-WebRequest works too).
+# another repository.
 $ErrorActionPreference = "Stop"
 
 $Repo = if ($env:AGENTLAB_REPO) { $env:AGENTLAB_REPO } else { "uptive/Uptive-AgentLab" }
@@ -28,7 +28,7 @@ try {
     try {
       Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$Repo/releases/latest/download/$Asset" -OutFile $Installer
     } catch {
-      throw "Download failed. The repository is private: install the GitHub CLI (winget install GitHub.cli), run gh auth login, and try again."
+      throw "Download failed. If the repository is private, install the GitHub CLI (winget install GitHub.cli), run gh auth login, and try again."
     }
   }
 

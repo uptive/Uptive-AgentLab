@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Installs or updates AgentLab on macOS (Apple Silicon) from the latest GitHub release.
 #
-#   gh release download -R uptive/Uptive-AgentLab -p install.sh -O - | bash
+#   curl -fsSL https://github.com/uptive/Uptive-AgentLab/releases/latest/download/install.sh | bash
 #
-# The repository is private, so the download goes through the GitHub CLI (`gh auth login` first).
+# Uses the GitHub CLI when it is logged in (needed if the repository is private), otherwise curl.
 # Set MONGODB_URI to skip the prompt for the connection string, and AGENTLAB_REPO to install from
-# another repository (e.g. a public releases repo, where plain curl works too).
+# another repository.
 set -euo pipefail
 
 REPO="${AGENTLAB_REPO:-uptive/Uptive-AgentLab}"
@@ -24,7 +24,7 @@ if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/n
   gh release download --repo "$REPO" --pattern "$ASSET" --dir "$tmp"
 else
   curl -fL --progress-bar -o "$tmp/$ASSET" "https://github.com/$REPO/releases/latest/download/$ASSET" \
-    || die "download failed. The repository is private: install the GitHub CLI (brew install gh), run gh auth login, and try again"
+    || die "download failed. If the repository is private, install the GitHub CLI (brew install gh), run gh auth login, and try again"
 fi
 
 dest="/Applications"
