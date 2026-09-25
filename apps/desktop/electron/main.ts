@@ -393,6 +393,8 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry, secrets
   // Renderer RunPersistenceAdapter bridge: load returns a full snapshot the sync
   // TelemetryStore can hydrate from; save writes the runs that changed.
   ipcMain.handle("telemetry:load", async (): Promise<PersistedState | null> => {
+    // Otherwise the renderer could load a stale "running" copy and save it back over the closed-out one.
+    await runs.recovered;
     try {
       return await telemetry.load();
     } catch (err) {
