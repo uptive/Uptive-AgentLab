@@ -13,8 +13,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@agentlab/contracts": "workspace:*",
