@@ -1,12 +1,12 @@
 import type { AgentDefinition, FlowNode, Recommendation } from "@agentlab/contracts";
-import { agentName, consumedNodeOutputs, criticalPathMs, formatSeconds, stepForNode, stepLatencyMs } from "../helpers.js";
+import { agentName, consumedNodeOutputs, criticalPathMs, formatSeconds, inputMappingOf, stepForNode, stepLatencyMs } from "../helpers.js";
 import type { EvaluationInput, Evaluator } from "../types.js";
 
 const EVALUATOR_ID = "flow-design";
 /** Re-wiring that saves less end-to-end time than this isn't worth reporting. */
 const MIN_PARALLEL_GAIN_MS = 500;
-/** Share of role words two agents must have in common before their responsibilities count as overlapping. */
-const ROLE_OVERLAP_THRESHOLD = 0.5;
+/** Share of instruction words two agents must have in common before their responsibilities count as overlapping. */
+const RESPONSIBILITY_OVERLAP_THRESHOLD = 0.5;
 const VALIDATION_PATTERN = /\b(validat\w*|verif\w*|gate|check\w*)\b/i;
 const STOPWORDS = new Set(["the", "a", "an", "and", "or", "of", "for", "to", "in", "on", "with", "it", "its", "is", "this", "that"]);
 
@@ -35,7 +35,7 @@ function parallelization(input: EvaluationInput): Recommendation[] {
   const baseline = criticalPathMs(input);
 
   for (const node of input.flow.nodes) {
-    const reads = consumedNodeOutputs(node);
+    const reads = consumedNodeOutputs(input, node);
     const unused = node.dependsOn.filter((dep) => !reads.includes(dep));
     if (unused.length === 0) continue;
 
@@ -48,7 +48,7 @@ function parallelization(input: EvaluationInput): Recommendation[] {
     const step = stepForNode(input, node.id);
     const waitedFor = unused.map((id) => nodeName(input, id));
     const name = agentName(input, node.agentId);
-    const readSources = Object.values(node.inputMapping ?? {});
+    const readSources = Object.values(inputMappingOf(input, node));
     recommendations.push({
       id: `${EVALUATOR_ID}:parallelization:${node.id}`,
       evaluatorId: EVALUATOR_ID,
@@ -84,9 +84,13 @@ function duplicatedWork(input: EvaluationInput): Recommendation[] {
     for (let j = i + 1; j < nodes.length; j++) {
       const [a, b] = [nodes[i], nodes[j]];
       const sameAgent = a.agentId === b.agentId;
-      const sameInputs = sameValues(a.inputMapping, b.inputMapping) && Object.keys(a.inputMapping ?? {}).length > 0;
+      const [mappingA, mappingB] = [inputMappingOf(input, a), inputMappingOf(input, b)];
+      const sameInputs = sameValues(mappingA, mappingB) && Object.keys(mappingA).length > 0;
       const sameOutputs = sameValues(schemaFields(agentOf(input, a)), schemaFields(agentOf(input, b)));
-      if (!sameAgent && !(sameInputs && sameOutputs)) continue;
+      // Parallel reviewers often share inputs and an output shape on purpose (e.g. code vs security
+      // review); it's only duplicated work when their instructions overlap too.
+      const sameResponsibility = responsibilityOverlap(agentOf(input, a), agentOf(input, b)) >= RESPONSIBILITY_OVERLAP_THRESHOLD;
+      if (!sameAgent && !(sameInputs && sameOutputs && sameResponsibility)) continue;
 
       const [nameA, nameB] = [nodeName(input, a.id), nodeName(input, b.id)];
       recommendations.push({
@@ -109,7 +113,7 @@ function duplicatedWork(input: EvaluationInput): Recommendation[] {
   return recommendations;
 }
 
-/** Two agents' role descriptions overlap so much that it's unclear which one owns what. */
+/** Two agents' instructions overlap so much that it's unclear which one owns what. */
 function unclearResponsibilities(input: EvaluationInput): Recommendation[] {
   const recommendations: Recommendation[] = [];
   const nodes = input.flow.nodes;
@@ -118,26 +122,35 @@ function unclearResponsibilities(input: EvaluationInput): Recommendation[] {
     for (let j = i + 1; j < nodes.length; j++) {
       const [agentA, agentB] = [agentOf(input, nodes[i]), agentOf(input, nodes[j])];
       if (!agentA || !agentB || agentA.id === agentB.id) continue;
-      const overlap = wordOverlap(agentA.role, agentB.role);
-      if (overlap < ROLE_OVERLAP_THRESHOLD) continue;
+      const overlap = responsibilityOverlap(agentA, agentB);
+      if (overlap < RESPONSIBILITY_OVERLAP_THRESHOLD) continue;
 
       recommendations.push({
         id: `${EVALUATOR_ID}:unclear-responsibilities:${nodes[i].id}:${nodes[j].id}`,
         evaluatorId: EVALUATOR_ID,
         category: "flow-design",
         tags: ["Responsibility"],
-        title: `Separate ${agentA.name}'s and ${agentB.name}'s roles`,
+        title: `Separate ${agentA.name}'s and ${agentB.name}'s responsibilities`,
         severity: "low",
         target: { kind: "node", nodeId: nodes[j].id, agentId: agentB.id },
-        problem: `${agentA.name} and ${agentB.name} have overlapping roles (${Math.round(overlap * 100)}% of role words shared), so it's unclear which one owns which part of the task.`,
-        suggestion: `Rewrite ${agentB.name}'s role to state what it covers that ${agentA.name} does not.`,
-        change: { type: "edit-role", path: `agents.${agentB.id}.role`, before: agentB.role, after: `${agentB.role} (excluding what ${agentA.name} covers)` },
+        problem: `${agentA.name} and ${agentB.name} have largely the same instructions (${Math.round(overlap * 100)}% of words shared), so it's unclear which one owns which part of the task.`,
+        suggestion: `Rewrite ${agentB.name}'s instructions to state what it covers that ${agentA.name} does not.`,
+        change: {
+          type: "edit-instructions",
+          path: "systemInstructions",
+          before: agentB.systemInstructions,
+          after: `${agentB.systemInstructions}\n\nLeave <what ${agentA.name} covers> to ${agentA.name}.`,
+        },
         estimatedImpact: { quality: { risk: "low" }, summary: "Each step owns a clear part of the task, so handoffs stop overlapping." },
-        evidence: [`${agentA.name}: "${agentA.role}"`, `${agentB.name}: "${agentB.role}"`],
+        evidence: [`${agentA.name}: "${excerptText(agentA.systemInstructions)}"`, `${agentB.name}: "${excerptText(agentB.systemInstructions)}"`],
       });
     }
   }
   return recommendations;
+}
+
+function excerptText(text: string, max = 160): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 /** The flow ends without any step that checks the final output. */
@@ -170,6 +183,14 @@ function missingValidation(input: EvaluationInput): Recommendation[] {
       estimatedImpact: { quality: { risk: "medium" }, summary: "The final output is checked before the run counts as done." },
     },
   ];
+}
+
+/**
+ * How much two agents' responsibilities overlap. Roles are short labels shared by many agents
+ * (e.g. "reviewer"); what an agent actually does is in its instructions, so compare those.
+ */
+function responsibilityOverlap(a: AgentDefinition | undefined, b: AgentDefinition | undefined): number {
+  return a && b ? wordOverlap(a.systemInstructions, b.systemInstructions) : 0;
 }
 
 function schemaFields(agent: AgentDefinition | undefined): Record<string, string> | undefined {

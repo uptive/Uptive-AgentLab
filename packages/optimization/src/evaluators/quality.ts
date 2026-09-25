@@ -1,5 +1,5 @@
 import type { AgentDefinition, Recommendation } from "@agentlab/contracts";
-import { agentName, stepForNode } from "../helpers.js";
+import { agentName, inputMappingOf, parseSource, stepForNode } from "../helpers.js";
 import type { EvaluationInput, Evaluator } from "../types.js";
 
 const EVALUATOR_ID = "quality";
@@ -23,12 +23,11 @@ export const qualityEvaluator: Evaluator = {
   },
 };
 
-/** Walks `<nodeId>.output.<path>` against the recorded run. Returns undefined when the source isn't a node output. */
+/** Walks a `<nodeId>.<path>` reference against the recorded run. Returns undefined when the source isn't a node output. */
 export function resolveOutputPath(input: EvaluationInput, source: string): { nodeId: string; path: string[]; value: unknown } | undefined {
-  const match = /^([^.$]+)\.output(?:\.(.+))?$/.exec(source);
-  if (!match) return undefined;
-  const [, nodeId, rest] = match;
-  const path = rest ? rest.split(".") : [];
+  const ref = parseSource(source);
+  if (ref.kind !== "node" || !input.flow.nodes.some((n) => n.id === ref.nodeId)) return undefined;
+  const { nodeId, path } = ref;
   let value: unknown = stepForNode(input, nodeId)?.output;
   for (const key of path) {
     value = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
@@ -52,13 +51,14 @@ export function brokenHandoffRecommendations(input: EvaluationInput): Recommenda
   const recommendations: Recommendation[] = [];
 
   for (const consumer of input.flow.nodes) {
-    for (const [field, source] of Object.entries(consumer.inputMapping ?? {})) {
+    for (const [field, source] of Object.entries(inputMappingOf(input, consumer))) {
       const resolved = resolveOutputPath(input, source);
       if (!resolved || (resolved.value !== undefined && resolved.value !== null)) continue;
 
       const producerNode = input.flow.nodes.find((n) => n.id === resolved.nodeId);
       const producerStep = stepForNode(input, resolved.nodeId);
-      if (!producerNode || !producerStep) continue;
+      // A producer that failed or never ran is a failed step, not a broken handoff.
+      if (!producerNode || !producerStep || producerStep.status !== "completed") continue;
       const producer = input.agents.find((a) => a.id === producerNode.agentId);
       const producerName = agentName(input, producerNode.agentId);
       const consumerName = agentName(input, consumer.agentId);

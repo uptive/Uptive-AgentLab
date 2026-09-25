@@ -40,7 +40,7 @@ export interface ClaudeCodeBridgeDeps {
   /** Saved agents from the local folder and MongoDB; sources that fail are left out and reported. */
   listAgents(): Promise<{ agents: BridgeAgentSummary[]; errors: string[] }>;
   getAgent(id: string): Promise<AgentDefinition | undefined>;
-  runs: AgentRuns;
+  runs: Pick<AgentRuns, "startRun" | "cancelRun">;
   telemetry: AsyncTelemetryStore;
 }
 

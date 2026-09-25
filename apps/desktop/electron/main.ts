@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { MongoClient, ServerApiVersion } from "mongodb";
 import {
   DEFAULT_AGENT_ROLES,
@@ -19,11 +19,12 @@ import {
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
 import { PERSISTED_STATE_VERSION } from "@agentlab/observability";
 import { createFileTelemetryStore } from "@agentlab/observability/file";
+import { createMongoRunReader, type MongoRunReader } from "@agentlab/observability/mongo";
 import { createMongoAgentStore, createMongoRoleStore, type MongoAgentStore } from "@agentlab/agent-runtime/mongo";
 import { createFileAgentStore } from "@agentlab/agent-runtime/files";
 import { createMongoFlowStore } from "@agentlab/flow-engine/mongo";
 import { parseFlow } from "@agentlab/flow-engine";
-import type { JsonRequest } from "@agentlab/optimization";
+import type { JsonRequest, JsonResponse } from "@agentlab/optimization";
 import { createModelClient } from "@agentlab/optimization/models";
 import { generateAgentDraft } from "./agentDraft.js";
 import { createClaudeCliRuntime } from "@agentlab/agent-runtime/claude-cli";
@@ -45,11 +46,23 @@ import { LocalToolRegistry } from "./localTools.js";
 import { listMcpSources } from "./mcpConfig.js";
 import { judgeAgentOutput } from "./agentTest.js";
 import { bridgeTokenPath, readBridgeToken } from "./bridgeToken.js";
-import { startClaudeCodeBridge,type BridgeAgentSummary, type BridgeFlowSummary, type ClaudeCodeBridge, type FlowSource } from "./claudeCodeBridge.js";
+import { startClaudeCodeBridge, type BridgeAgentSummary, type BridgeFlowSummary, type ClaudeCodeBridge, type FlowSource } from "./claudeCodeBridge.js";
+import { createHandle } from "./ipcHandle.js";
+import { NotificationSettingsStore } from "./notificationSettings.js";
+import { RunNotifier } from "./notifications.js";
+import { SecretStore } from "./secrets.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+const INDEX_HTML = path.join(__dirname, "../dist/index.html");
+
+/** The app's own page: the dev server in development, the bundled index.html when built. */
+const isAppUrl = (url: string) => (VITE_DEV_SERVER_URL ? url.startsWith(VITE_DEV_SERVER_URL) : url.startsWith(pathToFileURL(INDEX_HTML).href));
+
+// Windows shows toasts only for apps with an AppUserModelID. In development there is no installed
+// shortcut carrying ours, so the Electron executable's path is the id that works.
+if (process.platform === "win32") app.setAppUserModelId(app.isPackaged ? "se.uptive.agentlab" : process.execPath);
 
 // Opt-in DevTools protocol port for driving the app from scripts in development.
 if (process.env.AGENTLAB_DEBUG_PORT && !app.isPackaged) {
@@ -80,6 +93,7 @@ interface Stores {
   agents: MongoAgentStore;
   flows: FlowStore;
   roles: AgentRoleStore;
+  sharedRuns: MongoRunReader;
 }
 
 let stores: Promise<Stores> | undefined;
@@ -96,12 +110,13 @@ async function connect(): Promise<Stores> {
   });
   await client.connect();
   const db = client.db(process.env.MONGODB_DB || "agentlab");
-  // Runs are not stored here: telemetry is local to each computer (see the telemetry handlers).
+  // New runs are not stored here: telemetry is local to each computer (see the telemetry handlers).
+  // Runs saved before that are still read, read-only, so Optimize can analyze them.
   const [agents, flows, roles] = await Promise.all([createMongoAgentStore(db), createMongoFlowStore(db), createMongoRoleStore(db)]);
 
   // Flows saved to MongoDB are independent of local flow files (no mirroring): the flows list
   // shows both sources together, and the user picks where each flow lives.
-  return { client, agents, flows, roles };
+  return { client, agents, flows, roles, sharedRuns: createMongoRunReader(db) };
 }
 
 function getStores(): Promise<Stores> {
@@ -176,7 +191,7 @@ const JSON_FILTERS = [{ name: "Flow definition", extensions: ["json"] }];
 const slugify = (s: string) =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "flow";
 
-function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
+function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry, secrets: SecretStore, notifier: RunNotifier) {
   /** Renderer may only touch files the user registered via the project view. */
   const assertRegistered = async (filePath: string) => {
     if (!(await store.isRegistered(filePath))) throw new Error(`Flow file is not registered in the project: ${filePath}`);
@@ -349,8 +364,11 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   // outputs, so they are private by default rather than shared through MongoDB.
   const telemetry = createFileTelemetryStore(path.join(app.getPath("userData"), "telemetry"));
 
-  const agentRuns = registerAgentRunIpc({
+  const runs = registerAgentRunIpc({
     telemetry,
+    secrets,
+    onRunUpdate: (run) => notifier.runUpdated(run),
+    onRunFinished: (run, outcome) => notifier.runFinished(run, outcome),
     // Same lookup as the agent IPC: the local folder first, then MongoDB.
     getAgent: async (id) => {
       const [store] = await agentStoreFor(id);
@@ -358,8 +376,7 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
     },
     dataDir: app.isPackaged ? app.getPath("userData") : path.resolve(__dirname, "../../../data"),
   });
-  const runsRecovered = agentRuns.recovered;
-  startBridge(store, agentRuns, telemetry);
+  startBridge(store, runs, telemetry);
 
   ipcMain.handle(IPC.listMcp, () =>
     listMcpSources({ appDataDir: app.getPath("appData"), repoRoot: path.resolve(__dirname, "../../..") }),
@@ -369,13 +386,26 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   // Claude Code CLI and your Claude.ai subscription; AGENT_BACKEND=api uses the Anthropic API.
   const modelClient = createModelClient();
   console.log(`[optimize] model backend: ${process.env.AGENT_BACKEND ?? "cli"}`);
-  ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
+  ipcMain.handle(IPC.generateJson, async (_e, request: JsonRequest): Promise<JsonResponse> =>
+    modelClient.generateJsonWithUsage ? modelClient.generateJsonWithUsage(request) : { value: await modelClient.generateJson(request) },
+  );
   ipcMain.handle(IPC.judgeAgent, (_e, request: AgentJudgeRequest) => judgeAgentOutput(modelClient, request));
 
   ipcMain.handle(IPC.listCloudFlows, async () => (await getStores()).flows.list());
   ipcMain.handle(IPC.getCloudFlow, async (_e, id: string) => (await getStores()).flows.get(id));
   ipcMain.handle(IPC.saveCloudFlow, async (_e, flow: FlowDefinition) => (await getStores()).flows.save(flow));
   ipcMain.handle(IPC.deleteCloudFlow, async (_e, id: string) => (await getStores()).flows.delete(id));
+
+  // Optimize also lists runs saved to MongoDB earlier. Without a database connection it shows local runs only.
+  ipcMain.handle(IPC.listSharedRuns, async () => {
+    try {
+      return await (await getStores()).sharedRuns.listRuns();
+    } catch (err) {
+      console.warn("[optimize] shared runs unavailable:", (err as Error).message);
+      return [];
+    }
+  });
+  ipcMain.handle(IPC.getSharedRun, async (_e, runId: string) => (await getStores()).sharedRuns.getRun(runId));
 
   ipcMain.handle("telemetry:recordEvent", (_e, event: TraceEvent) => telemetry.recordEvent(event));
   ipcMain.handle("telemetry:listEvents", (_e, runId: string) => telemetry.listEvents(runId));
@@ -387,7 +417,7 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   // TelemetryStore can hydrate from; save writes the runs that changed.
   ipcMain.handle("telemetry:load", async (): Promise<PersistedState | null> => {
     // Otherwise the renderer could load a stale "running" copy and save it back over the closed-out one.
-    await runsRecovered;
+    await runs.recovered;
     try {
       return await telemetry.load();
     } catch (err) {
@@ -408,6 +438,8 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
       console.warn("[telemetry] save failed:", (err as Error).message);
     }
   });
+
+  return runs;
 }
 
 /** Saved flows from MongoDB and registered flow files, for the Claude Code bridge. */
@@ -489,7 +521,11 @@ function startBridge(store: EditorConfigStore, runs: AgentRuns, telemetry: Async
 // Packaged builds get their icon from electron-builder; dev runs need it set explicitly.
 const DEV_ICON = app.isPackaged ? undefined : path.join(__dirname, "../build/icon.png");
 
-function createWindow() {
+let mainWindow: BrowserWindow | undefined;
+/** Set once the user has agreed to quit, so closing the window no longer hides it to the tray. */
+let quitting = false;
+
+function createWindow(notifier: RunNotifier): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -508,12 +544,43 @@ function createWindow() {
     return { action: "deny" };
   });
 
+  // Closing the window while flows run hides it to the tray; the runs keep going in this process.
+  win.on("close", (event) => {
+    if (quitting) return;
+    if (notifier.shouldHideOnClose()) {
+      event.preventDefault();
+      win.hide();
+      notifier.hiddenToTray();
+    } else if (process.platform !== "darwin" && (runs?.activeRunCount() ?? 0) > 0) {
+      // Closing the last window quits on Windows; ask first (before-quit) while the window still exists.
+      event.preventDefault();
+      app.quit();
+    }
+  });
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = undefined;
+  });
+
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
+    void win.loadURL(VITE_DEV_SERVER_URL);
   } else {
-    win.loadFile(path.join(__dirname, "../dist/index.html"));
+    void win.loadFile(INDEX_HTML);
   }
+  mainWindow = win;
+  return win;
 }
+
+function showWindow(notifier: RunNotifier): BrowserWindow {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow(notifier);
+  if (win.isMinimized()) win.restore();
+  win.show();
+  if (process.platform === "darwin") app.focus({ steal: true });
+  win.focus();
+  return win;
+}
+
+let runs: ReturnType<typeof registerIpc> | undefined;
+let notifier: RunNotifier | undefined;
 
 app.whenReady().then(() => {
   if (DEV_ICON && process.platform === "darwin") app.dock?.setIcon(DEV_ICON);
@@ -522,7 +589,23 @@ app.whenReady().then(() => {
     path.join(app.getPath("documents"), "AgentLab", "Flows"),
   );
   void loadLocalAgents();
-  registerIpc(store, tools);
+  // One SecretStore per file: MCP tokens and the notification webhook share <userData>/secrets.json.
+  const secrets = new SecretStore(path.join(app.getPath("userData"), "secrets.json"));
+  const runNotifier: RunNotifier = new RunNotifier({
+    settings: new NotificationSettingsStore(path.join(app.getPath("userData"), "notification-settings.json")),
+    secrets,
+    getWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined),
+    showWindow: () => showWindow(runNotifier),
+    stopRun: (runId) => void runs?.cancelRun(runId).catch((error: Error) => console.warn("[runs] could not stop run:", error.message)),
+    rerun: (run) => (runs ? runs.rerun(run) : Promise.reject(new Error("Runs are not available yet"))),
+  });
+  notifier = runNotifier;
+  runs = registerIpc(store, tools, secrets, runNotifier);
+  runNotifier.registerIpc(createHandle(isAppUrl));
+  runNotifier.start().catch((error: Error) => {
+    console.error("[notifications] could not load settings:", error.message);
+    dialog.showErrorBox("Notification settings could not be read", `${error.message}\n\nAgentLab uses the default settings for now.`);
+  });
   tools.list().then(
     (found) => console.log(`[tools] ${found.filter((t) => t.installed).map((t) => t.id).join(", ") || "none"} available`),
     (error) => console.error("[tools] detection failed:", error.message),
@@ -531,7 +614,7 @@ app.whenReady().then(() => {
     () => console.log("[db] connected to MongoDB"),
     (error) => console.error("[db] MongoDB connection failed:", error.message),
   );
-  createWindow();
+  createWindow(runNotifier);
 });
 
 app.on("window-all-closed", () => {
@@ -541,12 +624,37 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+  // Also brings back a window that was hidden to the tray.
+  if (notifier) showWindow(notifier);
 });
 
-app.on("before-quit", () => {
+/** Quitting stops running flows, so ask first. */
+async function confirmQuit(activeRuns: number) {
+  const options: Electron.MessageBoxOptions = {
+    type: "warning",
+    buttons: ["Quit and stop runs", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: "Quit AgentLab?",
+    detail: `${activeRuns} ${activeRuns === 1 ? "run is" : "runs are"} still going. Quitting stops ${activeRuns === 1 ? "it" : "them"}.`,
+  };
+  const win = mainWindow?.isVisible() ? mainWindow : undefined;
+  const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  if (response !== 0) return;
+  quitting = true;
+  app.quit();
+}
+
+app.on("before-quit", (event) => {
+  const activeRuns = runs?.activeRunCount() ?? 0;
+  if (!quitting && activeRuns > 0) {
+    event.preventDefault();
+    confirmQuit(activeRuns).catch((error: Error) => dialog.showErrorBox("Could not quit", error.message));
+    return;
+  }
+  quitting = true;
+  runs?.dispose();
+  notifier?.dispose();
   tools.dispose();
   void bridge.then((b) => b?.close()).catch((error) => console.warn("[claude-code] could not close bridge:", error.message));
   stores?.then(({ client }) => client.close()).catch(() => {});

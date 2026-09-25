@@ -42,6 +42,18 @@ export interface Run {
   authSource?: AuthSource;
   /** Where the run was started from: the app itself, or Claude Code through the local bridge. */
   startedBy?: RunTrigger;
+  /**
+   * Set when the run tested suggested changes on copies of the flow and agents (from Optimize).
+   * The saved agents and flow were not changed by it.
+   */
+  trial?: RunTrial;
+}
+
+export interface RunTrial {
+  /** The run whose analysis suggested the changes. */
+  baseRunId: string;
+  /** Recommendations whose changes this run tested. */
+  recommendationIds: string[];
 }
 
 export type AuthSource = "subscription" | "api-key" | "unknown";

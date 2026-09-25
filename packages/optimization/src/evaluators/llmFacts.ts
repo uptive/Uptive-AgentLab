@@ -7,9 +7,10 @@ export function excerpt(value: unknown, max: number): unknown {
   return `${text.slice(0, max)}… [${text.length - max} more characters]`;
 }
 
-/** The run's task: the `task` field of the first step's input, when there is one. */
+/** The run's task: its `task` field when it has one, otherwise the whole run input (e.g. title, description, diff). */
 export function runTask(input: EvaluationInput): unknown {
   const root = input.flow.nodes.find((n) => n.dependsOn.length === 0);
-  const step = root && input.run.steps.find((s) => s.nodeId === root.id);
-  return (step?.input as Record<string, unknown> | undefined)?.task ?? null;
+  const runInput = input.run.input ?? (root && input.run.steps.find((s) => s.nodeId === root.id)?.input);
+  const task = (runInput as Record<string, unknown> | undefined)?.task;
+  return excerpt(task ?? runInput ?? null, 4000);
 }

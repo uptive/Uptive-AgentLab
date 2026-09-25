@@ -8,6 +8,8 @@ import {
   formatSeconds,
   formatTokens,
   inputFieldShares,
+  inputMappingOf,
+  parseSource,
   isLightStructuredStep,
   speedImpact,
 } from "../helpers.js";
@@ -34,25 +36,29 @@ function redundantFanInContext(input: EvaluationInput): Recommendation[] {
   const recommendations: Recommendation[] = [];
 
   for (const node of input.flow.nodes) {
-    if (node.dependsOn.length < 2 || !node.inputMapping) continue;
+    if (node.dependsOn.length < 2) continue;
+    const mapping = inputMappingOf(input, node);
     const step = input.run.steps.find((s) => s.nodeId === node.id);
     const agent = step && agentFor(input, step);
     if (!step || !agent || !step.usage) continue;
 
     for (const { field, share } of inputFieldShares(step)) {
-      const source = node.inputMapping[field];
+      const source = mapping[field];
       if (!source || share < 0.4) continue;
 
       const upstreamAlsoReceived = node.dependsOn.every((dep) => {
         const depNode = input.flow.nodes.find((n) => n.id === dep);
-        return Object.values(depNode?.inputMapping ?? {}).includes(source);
+        return depNode !== undefined && Object.values(inputMappingOf(input, depNode)).includes(source);
       });
       const consumesUpstreamOutputs = node.dependsOn.some((dep) =>
-        Object.values(node.inputMapping!).some((value) => value.startsWith(`${dep}.output`)),
+        Object.values(mapping).some((value) => {
+          const ref = parseSource(value);
+          return ref.kind === "node" && ref.nodeId === dep;
+        }),
       );
       if (!upstreamAlsoReceived || !consumesUpstreamOutputs) continue;
 
-      const receivers = input.flow.nodes.filter((n) => Object.values(n.inputMapping ?? {}).includes(source));
+      const receivers = input.flow.nodes.filter((n) => Object.values(inputMappingOf(input, n)).includes(source));
       const upstreamNames = node.dependsOn.map((dep) => agentName(input, input.flow.nodes.find((n) => n.id === dep)!.agentId));
       const impact = contextImpact(input, step, agent.model, share);
       recommendations.push({
@@ -89,7 +95,7 @@ function oversizedPlanningInput(input: EvaluationInput): Recommendation[] {
     const [dominant] = inputFieldShares(step);
     if (!dominant || ratio > 0.1 || dominant.share < 0.6) continue;
 
-    const source = node.inputMapping?.[dominant.field] ?? dominant.field;
+    const source = inputMappingOf(input, node)[dominant.field] ?? dominant.field;
     const impact = contextImpact(input, step, agent.model, dominant.share);
     recommendations.push({
       id: `${EVALUATOR_ID}:oversized-planning-input:${step.nodeId}:${dominant.field}`,

@@ -59,7 +59,6 @@ describe("Claude Code bridge", () => {
         getAgent: async (id) => (id === "missing" ? undefined : agent(id)),
         telemetry,
         runs: {
-          recovered: Promise.resolve(),
           cancelRun: async (runId) => void cancelled.push(runId),
           startRun: async (request) => {
             started.push(request);

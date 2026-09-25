@@ -95,8 +95,8 @@ describe("LLM-backed Quality", () => {
   it("validates proposed input mappings against the flow", async () => {
     const recs = await createQualityLlmEvaluator(
       mockClient([
-        qualityFinding({ changeType: "edit-input-mapping", targetNodeId: "validate", proposal: JSON.stringify({ findings: "security-review.output" }) }),
-        qualityFinding({ check: "final-output", changeType: "edit-input-mapping", targetNodeId: "validate", proposal: JSON.stringify({ x: "ghost.output" }) }),
+        qualityFinding({ changeType: "edit-input-mapping", targetNodeId: "validate", proposal: JSON.stringify({ findings: "security-review" }) }),
+        qualityFinding({ check: "final-output", changeType: "edit-input-mapping", targetNodeId: "validate", proposal: JSON.stringify({ x: "ghost" }) }),
       ]),
     ).evaluate(codeReviewFixture);
     expect(recs.map((r) => r.id)).toContain("quality:instructions:validate");

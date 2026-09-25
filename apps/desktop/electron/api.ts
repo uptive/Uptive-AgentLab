@@ -10,14 +10,17 @@ import type {
   McpServerDefinition,
   McpServerInput,
   Run,
+  RunTrial,
   RunTrigger,
   SkillDefinition,
   TraceEvent,
   Usage,
 } from "@agentlab/contracts";
 import type { ClaudeAuthStatus, McpTestResult } from "@agentlab/agent-runtime/claude";
-import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
-import type { JsonRequest } from "@agentlab/optimization";
+import type { AsyncTelemetryStore, PersistedState, RunListing } from "@agentlab/observability";
+import type { JsonRequest, JsonResponse } from "@agentlab/optimization";
+import type { NotificationSettings } from "./notificationSettings.js";
+import type { OptimizationSummary, RunOutcome } from "./notificationState.js";
 
 /** A flow file registered in the editor configuration. */
 export interface ProjectEntry {
@@ -47,6 +50,13 @@ export interface StartRunRequest {
   folder?: string;
   /** Set by the main process; whatever the renderer sends here is overwritten. */
   startedBy?: RunTrigger;
+  /**
+   * Agents to run instead of the saved ones with the same id. Used to test suggested changes on
+   * copies without saving them.
+   */
+  agents?: AgentDefinition[];
+  /** Marks the run as a test of suggested changes. */
+  trial?: RunTrial;
 }
 
 /** An unsaved agent run once from the editor. Not saved to Runs. */
@@ -252,6 +262,32 @@ export interface ToolRun {
   cancel(): Promise<boolean>;
 }
 
+export type { NotificationSettings, OptimizationSummary, RunOutcome };
+
+export interface NotificationStatus {
+  settings: NotificationSettings;
+  /** False on systems where the OS offers no notifications. */
+  supported: boolean;
+  webhookConfigured: boolean;
+  /** Why the last webhook post failed; cleared by the next one that succeeds. */
+  webhookError?: string;
+  /** Set when the settings file exists but could not be read. */
+  settingsError?: string;
+  /** Why the custom sound last failed to play (the system beep was used instead). */
+  soundError?: string;
+}
+
+export type WebhookTestResult = { status: "sent" } | { status: "not-configured" } | { status: "failed"; error: string };
+
+export interface NotificationTestResult {
+  /** False when the OS does not support notifications. */
+  notificationShown: boolean;
+  webhook: WebhookTestResult;
+}
+
+/** Where a notification or tray click sends the user. */
+export type OpenTarget = { view: "runs"; runId?: string } | { view: "optimize" };
+
 export interface AgentLabApi {
   projects: {
     list(): Promise<ProjectsState>;
@@ -308,6 +344,11 @@ export interface AgentLabApi {
     load(): Promise<PersistedState | null>;
     save(state: PersistedState): Promise<void>;
   };
+  /** Runs saved to the shared MongoDB before runs moved to local files. Read-only. */
+  sharedRuns: {
+    list(): Promise<RunListing[]>;
+    get(runId: string): Promise<{ run: Run; events: TraceEvent[] } | undefined>;
+  };
   /** Real flow runs, executed by the Claude runtime in the main process. */
   runs: {
     /** Resolves as soon as the run has started. Progress arrives through onUpdate/onEvent. */
@@ -344,9 +385,32 @@ export interface AgentLabApi {
     /** MCP servers configured for Claude Desktop, Claude Code, plugins, this repo and Cursor. Read-only. */
     list(): Promise<McpSource[]>;
   };
+  /** Run notifications, the tray icon and the Slack webhook. Everything is decided in the main process. */
+  notifications: {
+    status(): Promise<NotificationStatus>;
+    save(settings: NotificationSettings): Promise<NotificationStatus>;
+    /** null removes the stored URL. */
+    setWebhookUrl(url: string | null): Promise<NotificationStatus>;
+    /** Shows a sample notification and posts a sample message to the webhook, if one is set. */
+    sendTest(): Promise<NotificationTestResult>;
+    /** Opens a file dialog for the notification sound. Cancelling leaves it unchanged. */
+    pickSoundFile(): Promise<NotificationStatus>;
+    /** Goes back to the system sound. */
+    clearSoundFile(): Promise<NotificationStatus>;
+    /** Plays the chosen sound file once; rejects when it cannot be played. */
+    previewSound(): Promise<void>;
+    onStatus(listener: (status: NotificationStatus) => void): () => void;
+    /** Reports a finished Optimize analysis; main notifies only if the window is unfocused. */
+    optimizationFinished(summary: OptimizationSummary): Promise<void>;
+    /** Main asks the window to open something (a notification or tray item was clicked); call takeOpenTarget. */
+    onOpen(listener: () => void): () => void;
+    /** What the user asked to open, once; undefined when there is nothing. */
+    takeOpenTarget(): Promise<OpenTarget | undefined>;
+  };
   /** Model calls for LLM-backed evaluators; run in the main process so API credentials stay there. */
   optimization: {
-    generateJson(request: JsonRequest): Promise<unknown>;
+    /** The model's JSON answer plus the tokens, cost and time the call used. */
+    generateJson(request: JsonRequest): Promise<JsonResponse>;
   };
 }
 
@@ -359,6 +423,8 @@ export const IPC = {
   readFlow: "flows:read",
   writeFlow: "flows:write",
   listCloudFlows: "cloudFlows:list",
+  listSharedRuns: "sharedRuns:list",
+  getSharedRun: "sharedRuns:get",
   getCloudFlow: "cloudFlows:get",
   saveCloudFlow: "cloudFlows:save",
   deleteCloudFlow: "cloudFlows:delete",
@@ -394,4 +460,17 @@ export const IPC = {
   cancelAgentTest: "agents:test-cancel",
   agentTestStream: "agents:test-stream",
   judgeAgent: "agents:judge",
+  getNotificationStatus: "notifications:getStatus",
+  saveNotificationSettings: "notifications:saveSettings",
+  setNotificationWebhook: "notifications:setWebhookUrl",
+  sendTestNotification: "notifications:sendTest",
+  pickNotificationSound: "notifications:pickSoundFile",
+  clearNotificationSound: "notifications:clearSoundFile",
+  previewNotificationSound: "notifications:previewSound",
+  notifyOptimization: "notifications:optimizationFinished",
+  takeOpenTarget: "notifications:takeOpenTarget",
+  /** main -> renderer: NotificationStatus after any change. */
+  notificationStatus: "notifications:status",
+  /** main -> renderer: no payload; the renderer calls takeOpenTarget. */
+  openTarget: "notifications:open",
 } as const;

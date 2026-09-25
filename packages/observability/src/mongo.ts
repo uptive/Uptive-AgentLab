@@ -1,6 +1,6 @@
 import type { Db } from "mongodb";
 import type { Run, TraceEvent } from "@agentlab/contracts";
-import type { AsyncTelemetryStore } from "./index.js";
+import type { AsyncTelemetryStore, RunListing } from "./index.js";
 
 // Node-only: import this from the Electron main process, never the renderer.
 
@@ -38,6 +38,43 @@ export async function createMongoTelemetryStore(db: Db): Promise<AsyncTelemetryS
     async listRuns() {
       const docs = await runs.find().sort({ startedAt: -1 }).toArray();
       return docs.map(stripId);
+    },
+  };
+}
+
+/**
+ * Read-only access to runs other people saved to the shared database before runs moved to local
+ * files. Never writes and never creates indexes.
+ */
+export interface MongoRunReader {
+  listRuns(): Promise<RunListing[]>;
+  /** The run and its trace events, or undefined when it doesn't exist. */
+  getRun(runId: string): Promise<{ run: Run; events: TraceEvent[] } | undefined>;
+}
+
+export function createMongoRunReader(db: Db): MongoRunReader {
+  const runs = db.collection<RunDoc>("runs");
+  const events = db.collection<TraceEventDoc>("traceEvents");
+  return {
+    async listRuns() {
+      const docs = await runs
+        .find({}, { projection: { id: 1, flowId: 1, "flow.name": 1, status: 1, startedAt: 1, completedAt: 1 } })
+        .sort({ startedAt: -1 })
+        .toArray();
+      return docs.map((doc) => ({
+        id: doc.id,
+        flowId: doc.flowId,
+        flowName: doc.flow?.name,
+        status: doc.status,
+        startedAt: doc.startedAt,
+        completedAt: doc.completedAt,
+      }));
+    },
+    async getRun(runId) {
+      const doc = await runs.findOne({ _id: runId });
+      if (!doc) return undefined;
+      const eventDocs = await events.find({ runId }).sort({ timestamp: 1 }).toArray();
+      return { run: stripId(doc), events: eventDocs.map(stripId) };
     },
   };
 }
