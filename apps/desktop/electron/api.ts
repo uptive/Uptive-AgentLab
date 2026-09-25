@@ -12,6 +12,7 @@ import type {
   Run,
   SkillDefinition,
   TraceEvent,
+  Usage,
 } from "@agentlab/contracts";
 import type { ClaudeAuthStatus, McpTestResult } from "@agentlab/agent-runtime/claude";
 import type { AsyncTelemetryStore, PersistedState } from "@agentlab/observability";
@@ -43,6 +44,46 @@ export interface StartRunRequest {
   input: unknown;
   /** A folder agents may read (e.g. the repository a review flow looks at). */
   folder?: string;
+}
+
+/** An unsaved agent run once from the editor. Not saved to Runs. */
+export interface AgentTestRequest {
+  /** Chosen by the caller so it can match stream chunks (runId and stepRunId both equal it). */
+  testId: string;
+  agent: AgentDefinition;
+  input: unknown;
+}
+
+/** "no-schema" = nothing to check against, "bad-schema" = the schema itself does not compile. */
+export interface SchemaCheck {
+  status: "valid" | "invalid" | "no-schema" | "bad-schema" | "skipped";
+  errors: string[];
+}
+
+export interface AgentTestResult {
+  status: "completed" | "failed" | "cancelled";
+  output: unknown;
+  error?: string;
+  usage: Usage;
+  toolCallCount: number;
+  inputCheck: SchemaCheck;
+  /** "skipped" when the run did not complete. */
+  outputCheck: SchemaCheck;
+}
+
+export interface AgentJudgeRequest {
+  agent: AgentDefinition;
+  input: unknown;
+  output: unknown;
+}
+
+/** Claude's grade of one test output against the agent's instructions. */
+export interface AgentJudgement {
+  /** 1 (unusable) to 5 (fully meets the instructions). */
+  score: number;
+  verdict: string;
+  strengths: string[];
+  issues: string[];
 }
 
 /** A server in the app's MCP library (see McpServerEntry for servers listed from other apps' configs). */
@@ -228,6 +269,13 @@ export interface AgentLabApi {
   agents: AgentsApi & {
     /** Asks the claude CLI to map a description into agent fields. Nothing is saved. */
     draft(request: AgentDraftRequest): Promise<AgentDraft>;
+    /** Runs an agent definition (saved or not) once with the real runtime. Not saved to Runs. */
+    test(request: AgentTestRequest): Promise<AgentTestResult>;
+    cancelTest(testId: string): Promise<void>;
+    /** Live token output of running tests, in batches. */
+    onTestStream(listener: (chunks: AgentStreamChunk[]) => void): () => void;
+    /** Asks Claude to score a test output. One extra model call. */
+    judge(request: AgentJudgeRequest): Promise<AgentJudgement>;
   };
   /** Flows saved to MongoDB. Independent of the local file flows above — not synced with them. */
   cloudFlows: FlowStore;
@@ -339,4 +387,8 @@ export const IPC = {
   /** main -> renderer: `{ runId, stream, chunk }` for runs started with a runId. */
   toolOutput: "tools:output",
   runAgent: "runtime:run",
+  testAgent: "agents:test",
+  cancelAgentTest: "agents:test-cancel",
+  agentTestStream: "agents:test-stream",
+  judgeAgent: "agents:judge",
 } as const;

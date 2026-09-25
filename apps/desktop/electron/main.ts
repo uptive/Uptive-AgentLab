@@ -29,6 +29,7 @@ import { createClaudeCliRuntime } from "@agentlab/agent-runtime/claude-cli";
 import {
   IPC,
   type AgentDraftRequest,
+  type AgentJudgeRequest,
   type AgentListing,
   type AgentSource,
   type ProjectEntry,
@@ -41,6 +42,7 @@ import { describeFlowFile, EditorConfigStore } from "./editorConfig.js";
 import { claudeBinaryPath, registerAgentRunIpc } from "./agentRuns.js";
 import { LocalToolRegistry } from "./localTools.js";
 import { listMcpSources } from "./mcpConfig.js";
+import { judgeAgentOutput } from "./agentTest.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -360,6 +362,7 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   const modelClient = createModelClient();
   console.log(`[optimize] model backend: ${process.env.AGENT_BACKEND ?? "cli"}`);
   ipcMain.handle(IPC.generateJson, (_e, request: JsonRequest) => modelClient.generateJson(request));
+  ipcMain.handle(IPC.judgeAgent, (_e, request: AgentJudgeRequest) => judgeAgentOutput(modelClient, request));
 
   ipcMain.handle(IPC.listCloudFlows, async () => (await getStores()).flows.list());
   ipcMain.handle(IPC.getCloudFlow, async (_e, id: string) => (await getStores()).flows.get(id));
