@@ -8,7 +8,8 @@ import type { AsyncTelemetryStore } from "@agentlab/observability";
 import { createClaudeAgentRuntime, createClaudeCodeJsonClient, getClaudeAuthStatus, testMcpServer, type ClaudeAuthStatus } from "@agentlab/agent-runtime/claude";
 import { createMcpServerFileStore, createSkillFileStore, parseSkillFile } from "@agentlab/agent-runtime/library";
 import { createFlowEngine } from "@agentlab/flow-engine";
-import { IPC, type ImportResult, type LibraryMcpServer, type StartRunRequest } from "./api.js";
+import { IPC, type AgentTestRequest, type AgentTestResult, type ImportResult, type LibraryMcpServer, type StartRunRequest } from "./api.js";
+import { checkSchema } from "./agentTest.js";
 import { SecretStore } from "./secrets.js";
 
 // Runs flows for real with the Claude runtime, and manages the skill and MCP libraries.
@@ -159,6 +160,56 @@ export function registerAgentRunIpc(deps: AgentRunsDeps) {
 
   ipcMain.handle(IPC.cancelRun, async (_e, runId: string) => {
     active.get(runId)?.abort();
+  });
+
+  // Test runs from the agent editor: the same runtime as flow runs, but for an unsaved definition,
+  // streamed on their own channel and never saved to telemetry.
+  const activeTests = new Map<string, AbortController>();
+  ipcMain.handle(IPC.testAgent, async (_e, { testId, agent, input }: AgentTestRequest): Promise<AgentTestResult> => {
+    const controller = new AbortController();
+    activeTests.set(testId, controller);
+    const batcher = createStreamBatcher((chunks) => broadcast(IPC.agentTestStream, chunks));
+    const inputCheck = checkSchema(agent.inputSchema, input);
+    const skipped = { status: "skipped" as const, errors: [] };
+    const startedAt = Date.now();
+    const runtime = createClaudeAgentRuntime({
+      skillsDir: skills.dir,
+      workspaceRoot,
+      resolveMcpServer: (id) => mcpServers.get(id),
+      resolveSecret: (ref) => secrets.get(ref),
+      onStream: (chunk) => batcher.push(chunk),
+      signal: controller.signal,
+      pathToClaudeCodeExecutable,
+    });
+    try {
+      const result = await runtime.run(agent, input, { runId: testId, stepRunId: testId });
+      const cancelled = controller.signal.aborted;
+      return {
+        status: cancelled ? "cancelled" : result.status,
+        output: result.output,
+        error: result.error,
+        usage: result.usage,
+        toolCallCount: result.toolCalls.length,
+        inputCheck,
+        outputCheck: result.status === "completed" && !cancelled ? checkSchema(agent.outputSchema, result.output) : skipped,
+      };
+    } catch (error) {
+      return {
+        status: controller.signal.aborted ? "cancelled" : "failed",
+        output: undefined,
+        error: (error as Error).message,
+        usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, latencyMs: Date.now() - startedAt },
+        toolCallCount: 0,
+        inputCheck,
+        outputCheck: skipped,
+      };
+    } finally {
+      batcher.flush();
+      activeTests.delete(testId);
+    }
+  });
+  ipcMain.handle(IPC.cancelAgentTest, async (_e, testId: string) => {
+    activeTests.get(testId)?.abort();
   });
 
   ipcMain.handle(IPC.pickFolder, async (event) => {
