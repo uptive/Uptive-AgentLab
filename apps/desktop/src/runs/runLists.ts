@@ -1,24 +1,12 @@
 import type { Run, RunStatus } from "@agentlab/contracts";
 
-/** How long a finished run stays on the Live tab, so it doesn't vanish the moment it ends. */
-export const RECENTLY_FINISHED_MS = 5 * 60 * 1000;
-
 const newestFirst = (a: Run, b: Run) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
 
 const isActive = (run: Run) => run.status === "running" || run.status === "pending";
 
-/** Splits runs into what is executing now and what finished within the last few minutes, newest first. */
-export function partitionLiveRuns(runs: readonly Run[], now: number): { active: Run[]; recentlyFinished: Run[] } {
-  const active: Run[] = [];
-  const recentlyFinished: Run[] = [];
-  for (const run of runs) {
-    if (isActive(run)) {
-      active.push(run);
-    } else if (run.completedAt && now - new Date(run.completedAt).getTime() <= RECENTLY_FINISHED_MS) {
-      recentlyFinished.push(run);
-    }
-  }
-  return { active: active.sort(newestFirst), recentlyFinished: recentlyFinished.sort(newestFirst) };
+/** Runs executing right now, newest first. */
+export function activeRuns(runs: readonly Run[]): Run[] {
+  return runs.filter(isActive).sort(newestFirst);
 }
 
 export function countActiveRuns(runs: readonly Run[]): number {

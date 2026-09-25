@@ -134,7 +134,7 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 
 **2.6 Split the big views** into feature folders (see Part 3):
 - `AgentsView.tsx` (1091 lines) → `useAgents`, `useAgentForm`, `AgentDrawer`, `DraftPreview`, `AgentCard`
-- `RunsView.tsx` (852 lines, 12 components) and `OptimizeView.tsx` (831 lines) → their existing `runs/` and `optimize/` folders
+- `RunsView.tsx` (379 lines; still holds `NewRunDialog`, move it to `runs/`) and `OptimizeView.tsx` (831 lines) → their existing `runs/` and `optimize/` folders
 
 **2.7 Deduplicate frontend helpers:**
 - The IPC error cleaner exists 5 times: `AgentsView:132`, `useLibrary:8`, `flow-editor/bridge:10`, `optimize/modelClient:15`, `RunsView:509`.
@@ -181,7 +181,6 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 - The `pnpm.onlyBuiltDependencies` field in `package.json` is ignored by current pnpm (the warning shows on every command). It's already covered by `allowBuilds` in `pnpm-workspace.yaml`, so remove it.
 
 ### P3 — Small stuff
-- A hard-coded color, `#fdfdfdaa`, is invisible in light mode. `RunsView.tsx:428`.
 - Fixture-specific checklist text sits in a production heuristic. `optimization/src/evaluators/quality.ts:174-178`.
 - Timers aren't cleaned up: nested `requestAnimationFrame` in `OptimizeView.tsx:391` and `setTimeout` in `SetupView.tsx:227`.
 - Nav buttons are missing `aria-current`, and the `agentlab:navigate` CustomEvent is untyped.

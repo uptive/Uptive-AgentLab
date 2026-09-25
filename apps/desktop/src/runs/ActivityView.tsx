@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActivityBlock } from "../liveRuns.js";
 import { theme } from "../theme.js";
-import { JsonView } from "./JsonView.js";
+import { ReadableValue } from "./ReadableValue.js";
+import { summarizeToolCall } from "./toolSummary.js";
 import { formatMs } from "./format.js";
 
 // A step's activity as a timeline: what the agent thought, said and which tools it called.
@@ -11,10 +12,13 @@ const labelStyle = { fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTran
 
 function Cursor() {
   return (
-    <span
-      aria-hidden
-      style={{ display: "inline-block", width: 7, height: 14, marginLeft: 2, verticalAlign: "text-bottom", background: theme.primary, animation: "agentlab-blink 1s steps(2) infinite" }}
-    />
+    <>
+      <style>{"@keyframes agentlab-blink { 50% { opacity: 0 } }"}</style>
+      <span
+        aria-hidden
+        style={{ display: "inline-block", width: 7, height: 14, marginLeft: 2, verticalAlign: "text-bottom", background: theme.primary, animation: "agentlab-blink 1s steps(2) infinite" }}
+      />
+    </>
   );
 }
 
@@ -36,40 +40,86 @@ function Thinking({ block, streaming }: { block: ActivityBlock; streaming: boole
 }
 
 function ToolUse({ block, streaming }: { block: ActivityBlock; streaming: boolean }) {
+  const [showInput, setShowInput] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
   const done = block.output !== undefined;
-  const name = block.toolName?.replace(/^mcp__([^_]+)__/, "$1 · ") ?? "tool";
+  const input = block.input ?? parseInput(block.text);
+  const summary = summarizeToolCall(block.toolName, input);
+  const hasInput = input !== undefined && typeof input === "object";
   return (
-    <div style={{ border: `1px solid ${theme.border}`, borderRadius: 8, padding: 10, background: theme.surface }}>
+    <div
+      style={{
+        border: `1px solid ${block.failed ? theme.danger : theme.border}`,
+        borderRadius: 8,
+        padding: 10,
+        background: block.failed ? theme.errorBg : theme.surface,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
         <span aria-hidden>🔧</span>
-        <strong style={{ fontFamily: theme.fontMono, fontSize: 12.5 }}>{name}</strong>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: block.failed ? theme.danger : theme.textMuted }}>
-          {block.failed ? "failed" : done ? (block.durationMs !== undefined ? formatMs(block.durationMs) : "done") : streaming ? "writing input…" : "running…"}
+        <strong>{summary.title}</strong>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: block.failed ? theme.danger : theme.textMuted, fontWeight: block.failed ? 700 : 400 }}>
+          {block.failed ? "Failed" : done ? (block.durationMs !== undefined ? formatMs(block.durationMs) : "Done") : streaming ? "Preparing…" : "Running…"}
         </span>
       </div>
-      {block.input !== undefined && typeof block.input !== "string" ? (
-        <div style={{ marginTop: 6 }}>
-          <JsonView value={block.input} openDepth={1} maxHeight={200} />
+      {summary.detail ? (
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: 12.5,
+            fontFamily: summary.mono ? theme.fontMono : undefined,
+            color: theme.textSecondary,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {summary.detail}
         </div>
-      ) : block.text ? (
-        <pre style={{ margin: "6px 0 0", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word", color: theme.textSecondary }}>
-          {block.text}
-          {streaming ? <Cursor /> : null}
-        </pre>
+      ) : null}
+      {hasInput ? (
+        <Toggle open={showInput} onToggle={() => setShowInput((v) => !v)} label={summary.detail ? "All arguments" : "Arguments"}>
+          <ReadableValue value={input} />
+        </Toggle>
       ) : null}
       {done ? (
-        <div style={{ marginTop: 6 }}>
-          <button type="button" onClick={() => setShowOutput((v) => !v)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", ...labelStyle }}>
-            {showOutput ? "▾" : "▸"} Result
-          </button>
-          {showOutput ? (
-            <div style={{ marginTop: 4 }}>
-              <JsonView value={block.output} openDepth={1} maxHeight={260} />
-            </div>
-          ) : null}
-        </div>
+        <Toggle open={showOutput} onToggle={() => setShowOutput((v) => !v)} label={block.failed ? "Error" : "Result"}>
+          <ReadableValue value={block.output} />
+        </Toggle>
       ) : null}
+      {streaming && !hasInput ? <Cursor /> : null}
+    </div>
+  );
+}
+
+function Toggle({ open, onToggle, label, children }: { open: boolean; onToggle: () => void; label: string; children: ReactNode }) {
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button type="button" onClick={onToggle} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", ...labelStyle }}>
+        {open ? "▾" : "▸"} {label}
+      </button>
+      {open ? <div style={{ marginTop: 4, fontSize: 12.5, color: theme.text }}>{children}</div> : null}
+    </div>
+  );
+}
+
+/** Tool input streams in as JSON text; show it once it parses. */
+function parseInput(text: string): unknown {
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** One thinking, text or tool block; the last one streams while the step runs. */
+export function ActivityBlockView({ block, streaming }: { block: ActivityBlock; streaming: boolean }) {
+  if (block.kind === "thinking") return <Thinking block={block} streaming={streaming} />;
+  if (block.kind === "tool_use") return <ToolUse block={block} streaming={streaming} />;
+  return (
+    <div style={{ whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.55, color: theme.text }}>
+      {block.text}
+      {streaming ? <Cursor /> : null}
     </div>
   );
 }
@@ -97,18 +147,9 @@ export function ActivityView({ blocks, running }: { blocks: ActivityBlock[]; run
       }}
       style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 460, overflowY: "auto", paddingRight: 4 }}
     >
-      <style>{"@keyframes agentlab-blink { 50% { opacity: 0 } }"}</style>
-      {blocks.map((block, index) => {
-        const streaming = running && index === blocks.length - 1;
-        if (block.kind === "thinking") return <Thinking key={index} block={block} streaming={streaming} />;
-        if (block.kind === "tool_use") return <ToolUse key={index} block={block} streaming={streaming} />;
-        return (
-          <div key={index} style={{ whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.55, color: theme.text }}>
-            {block.text}
-            {streaming ? <Cursor /> : null}
-          </div>
-        );
-      })}
+            {blocks.map((block, index) => (
+        <ActivityBlockView key={index} block={block} streaming={running && index === blocks.length - 1} />
+      ))}
     </div>
   );
 }

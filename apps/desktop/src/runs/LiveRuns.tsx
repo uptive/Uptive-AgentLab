@@ -2,12 +2,12 @@ import { useState } from "react";
 import type { Run, StepStatus } from "@agentlab/contracts";
 import { summarizeRun } from "@agentlab/observability";
 import { theme } from "../theme.js";
-import { useLiveStep, type LiveStep } from "../liveRuns.js";
+import { useLiveSteps, type LiveStep } from "../liveRuns.js";
 import type { Catalog } from "./catalog.js";
-import { formatMs, formatRelative, formatUsd } from "./format.js";
+import { formatMs, formatUsd } from "./format.js";
 import { stopRun } from "./runLauncher.js";
-import { partitionLiveRuns } from "./runLists.js";
-import { StatusBadge, buttonStyle, resolveRunFlow, useNow } from "./runUi.js";
+import { activeRuns } from "./runLists.js";
+import { buttonStyle, resolveRunFlow, useNow } from "./runUi.js";
 
 const STEP_ICONS: Record<StepStatus, string> = { pending: "○", running: "◉", completed: "✓", failed: "✗" };
 const STEP_COLORS: Record<StepStatus, string> = {
@@ -33,19 +33,35 @@ function RunCard({ run, catalog, now, onOpen }: { run: Run; catalog: Catalog; no
   const stepByNodeId = new Map(run.steps.map((step) => [step.nodeId, step]));
   const agentName = (agentId: string) => catalog.agentsById.get(agentId)?.name ?? agentId;
   const runningSteps = run.steps.filter((step) => step.status === "running");
-  const live = useLiveStep(runningSteps[0]?.id);
+  const liveSteps = useLiveSteps();
+  const live = runningSteps[0] ? liveSteps.get(runningSteps[0].id) : undefined;
   const activity = describeActivity(live);
   const completed = run.steps.filter((step) => step.status === "completed").length;
   const total = Math.max(run.steps.length, flow.nodes.length);
   const progress = total > 0 ? completed / total : 0;
-  const tokens = summary.inputTokens + summary.outputTokens;
+  // Running steps have no final usage yet; add what they have streamed so far.
+  const streamed = runningSteps
+    .filter((step) => !step.usage)
+    .reduce((sum, step) => sum + (liveSteps.get(step.id)?.inputTokens ?? 0) + (liveSteps.get(step.id)?.outputTokens ?? 0), 0);
+  const tokens = summary.inputTokens + summary.outputTokens + streamed;
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${flow.name}`}
+      onClick={() => onOpen(run.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(run.id);
+        }
+      }}
       style={{
         display: "flex",
         flexDirection: "column",
         gap: 10,
+        cursor: "pointer",
         background: theme.surface,
         border: `1px solid ${theme.border}`,
         borderRadius: 8,
@@ -107,10 +123,16 @@ function RunCard({ run, catalog, now, onOpen }: { run: Run; catalog: Catalog; no
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <button type="button" onClick={() => onOpen(run.id)} style={buttonStyle("secondary")}>
-          Open
-        </button>
-        <button type="button" onClick={() => stopRun(run)} title="Stop this run" style={buttonStyle("danger")}>
+        <span style={{ fontSize: 12, color: theme.primary, alignSelf: "center" }}>Open live view →</span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            stopRun(run);
+          }}
+          title="Stop this run"
+          style={buttonStyle("danger")}
+        >
           ◼ Stop
         </button>
       </div>
@@ -147,10 +169,10 @@ function StopAllButton({ runs }: { runs: Run[] }) {
   );
 }
 
-/** Dashboard of what is executing now, plus runs that just finished. */
+/** Dashboard of what is executing right now; finished runs are in the history. */
 export function LiveRuns({ runs, catalog, onOpen }: { runs: Run[]; catalog: Catalog; onOpen: (runId: string) => void }) {
   const now = useNow(true, 1000);
-  const { active, recentlyFinished } = partitionLiveRuns(runs, now);
+  const active = activeRuns(runs);
   const totals = active.map((run) => summarizeRun(run));
   const totalTokens = totals.reduce((sum, s) => sum + s.inputTokens + s.outputTokens, 0);
   const totalCost = totals.reduce((sum, s) => sum + s.estimatedCostUsd, 0);
@@ -179,39 +201,6 @@ export function LiveRuns({ runs, catalog, onOpen }: { runs: Run[]; catalog: Cata
         </>
       )}
 
-      {recentlyFinished.length > 0 ? (
-        <div>
-          <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 6 }}>Just finished</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {recentlyFinished.map((run) => (
-              <button
-                key={run.id}
-                type="button"
-                onClick={() => onOpen(run.id)}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "110px 1fr 90px 90px",
-                  alignItems: "center",
-                  gap: 12,
-                  textAlign: "left",
-                  cursor: "pointer",
-                  background: theme.surface,
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 8,
-                  padding: "8px 12px",
-                  color: theme.text,
-                  fontSize: 13,
-                }}
-              >
-                <StatusBadge status={run.status} />
-                <span>{resolveRunFlow(run, catalog).name}</span>
-                <span style={{ color: theme.textMuted }}>{run.completedAt ? formatRelative(run.completedAt) : "-"}</span>
-                <span>{formatUsd(summarizeRun(run).estimatedCostUsd)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

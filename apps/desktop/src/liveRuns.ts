@@ -44,6 +44,8 @@ export interface LiveStep {
 }
 
 const liveSteps = new Map<string, LiveStep>();
+// Immutable copy handed to React; replaced after every batch of chunks.
+let liveSnapshot: ReadonlyMap<string, LiveStep> = new Map();
 const liveListeners = new Set<() => void>();
 
 function applyChunks(chunks: AgentStreamChunk[]) {
@@ -63,6 +65,7 @@ function applyChunks(chunks: AgentStreamChunk[]) {
     }
     liveSteps.set(chunk.stepRunId, next);
   }
+  liveSnapshot = new Map(liveSteps);
   for (const listener of liveListeners) listener();
 }
 
@@ -85,6 +88,18 @@ export function useLiveStep(stepRunId: string | undefined): LiveStep | undefined
   );
 }
 
+/** The live streams of every step started in this session, keyed by step run id. */
+export function useLiveSteps(): ReadonlyMap<string, LiveStep> {
+  connectStream();
+  return useSyncExternalStore(
+    (listener) => {
+      liveListeners.add(listener);
+      return () => liveListeners.delete(listener);
+    },
+    () => liveSnapshot,
+  );
+}
+
 const parseJson = (text: string): unknown => {
   try {
     return JSON.parse(text);
@@ -92,6 +107,9 @@ const parseJson = (text: string): unknown => {
     return text || undefined;
   }
 };
+
+// The runtime's own structured-output tool is plumbing; its input is the step output shown elsewhere.
+const isVisibleTool = (name?: string) => name !== "StructuredOutput";
 
 interface ModelCallData {
   thinking?: string;
@@ -113,13 +131,11 @@ interface ToolCallData {
 export function buildActivity(stepRunId: string, events: TraceEvent[], live: LiveStep | undefined): ActivityBlock[] {
   const stepEvents = events.filter((e) => e.stepRunId === stepRunId);
   const toolCalls = stepEvents.filter((e) => e.type === "tool_call").map((e) => e.data as ToolCallData);
-  // The runtime's own structured-output tool is plumbing; its input is the step output shown above.
-  const visible = (name?: string) => name !== "StructuredOutput";
 
   if (live && live.blocks.length > 0) {
     const results = new Map(toolCalls.filter((c) => c.toolUseId).map((c) => [c.toolUseId!, c]));
     return live.blocks
-      .filter((b) => b.kind !== "tool_use" || visible(b.toolName))
+      .filter((b) => b.kind !== "tool_use" || isVisibleTool(b.toolName))
       .map((block) => {
         if (block.kind !== "tool_use") return block;
         const result = block.toolUseId ? results.get(block.toolUseId) : undefined;
@@ -133,16 +149,23 @@ export function buildActivity(stepRunId: string, events: TraceEvent[], live: Liv
       });
   }
 
-  const blocks: ActivityBlock[] = [];
-  for (const event of stepEvents) {
-    if (event.type === "model_call") {
-      const data = event.data as ModelCallData;
-      if (data.thinking) blocks.push({ kind: "thinking", text: data.thinking });
-      if (data.text) blocks.push({ kind: "text", text: data.text });
-    } else if (event.type === "tool_call") {
-      const data = event.data as ToolCallData;
-      if (!visible(data.toolId)) continue;
-      blocks.push({
+  return stepEvents.flatMap(eventBlocks);
+}
+
+/** The activity blocks one recorded trace event stands for; empty for events that aren't activity. */
+export function eventBlocks(event: TraceEvent): ActivityBlock[] {
+  if (event.type === "model_call") {
+    const data = event.data as ModelCallData;
+    const blocks: ActivityBlock[] = [];
+    if (data.thinking) blocks.push({ kind: "thinking", text: data.thinking });
+    if (data.text) blocks.push({ kind: "text", text: data.text });
+    return blocks;
+  }
+  if (event.type === "tool_call") {
+    const data = event.data as ToolCallData;
+    if (!isVisibleTool(data.toolId)) return [];
+    return [
+      {
         kind: "tool_use",
         text: "",
         toolName: data.toolId,
@@ -151,8 +174,8 @@ export function buildActivity(stepRunId: string, events: TraceEvent[], live: Liv
         output: data.output,
         failed: data.status === "failed",
         durationMs: data.durationMs,
-      });
-    }
+      },
+    ];
   }
-  return blocks;
+  return [];
 }
