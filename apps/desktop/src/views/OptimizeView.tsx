@@ -22,6 +22,7 @@ import {
 import { SeverityIcon, TagIcon, TagList } from "../optimize/badges.js";
 import { modelClient } from "../optimize/modelClient.js";
 import { runSource, type RunSummary } from "../optimize/runSource.js";
+import { reportOptimizationFinished } from "../notifications/bridge.js";
 import "./OptimizeView.css";
 
 const CATEGORY_LABELS: Record<RecommendationCategory, string> = {
@@ -133,6 +134,13 @@ export function OptimizeView() {
       setResult(evaluation);
       setAnalyzedWith(modelId);
       setExpanded(new Set());
+      // Main shows a notification only if the user switched to another app while this ran.
+      reportOptimizationFinished({
+        flowName: loaded.flow.name,
+        recommendations: evaluation.recommendations.length,
+        highSeverity: evaluation.recommendations.filter((r) => r.severity === "high").length,
+        savedUsdPerRun: evaluation.summary.baseline.costUsd - evaluation.summary.projected.costUsd,
+      }).catch((e: Error) => setError(`The analysis finished, but the notification could not be sent: ${e.message}`));
     } catch (e) {
       setResult(undefined);
       setError(e instanceof Error ? e.message : String(e));
