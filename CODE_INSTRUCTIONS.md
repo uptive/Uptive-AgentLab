@@ -156,7 +156,6 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 - the import-time mock `engine` (`flow-engine/src/index.ts:13`)
 - `computeFlowLayers` (`flow-engine/src/demo.ts:30`)
 - unused telemetry CRUD IPC channels
-- `jsonClient` returned but ignored (`agentRuns.ts:210`)
 - stale chunks in `dist-electron/`
 
 **2.11 Merge the two MCP screens** ("Tools & skills" library vs "MCP" read-only list of other apps' configs). Also a team decision; see `docs/agent-runtime-checkpoint.md`.

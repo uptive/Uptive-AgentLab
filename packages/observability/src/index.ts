@@ -280,3 +280,21 @@ export function summarizeRun(run: Run, events?: TraceEvent[]): RunSummary {
 export function getStepRun(run: Run, stepRunId: string): StepRun | undefined {
   return run.steps.find((step) => step.id === stepRunId);
 }
+
+/**
+ * Closes out a run that can no longer progress (stopped by the user, crashed, or interrupted by a
+ * quit): the run and every step still pending or running become failed with `reason`. Steps that
+ * already finished keep their status, output, `completedAt` and `error`.
+ */
+export function interruptRun(run: Run, reason: string, at = new Date().toISOString()): Run {
+  return {
+    ...run,
+    status: "failed",
+    completedAt: run.completedAt ?? at,
+    steps: run.steps.map((step) =>
+      step.status === "running" || step.status === "pending"
+        ? { ...step, status: "failed", completedAt: step.completedAt ?? at, error: step.error ?? reason }
+        : step,
+    ),
+  };
+}

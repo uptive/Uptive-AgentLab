@@ -343,7 +343,7 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   // outputs, so they are private by default rather than shared through MongoDB.
   const telemetry = createFileTelemetryStore(path.join(app.getPath("userData"), "telemetry"));
 
-  registerAgentRunIpc({
+  const runsRecovered = registerAgentRunIpc({
     telemetry,
     // Same lookup as the agent IPC: the local folder first, then MongoDB.
     getAgent: async (id) => {
@@ -378,6 +378,8 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry) {
   // Renderer RunPersistenceAdapter bridge: load returns a full snapshot the sync
   // TelemetryStore can hydrate from; save writes the runs that changed.
   ipcMain.handle("telemetry:load", async (): Promise<PersistedState | null> => {
+    // Otherwise the renderer could load a stale "running" copy and save it back over the closed-out one.
+    await runsRecovered;
     try {
       return await telemetry.load();
     } catch (err) {
