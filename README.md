@@ -68,7 +68,23 @@ This starts Vite + Electron with hot reload.
 pnpm typecheck
 ```
 
-## Package the desktop app
+## Install the desktop app
+
+Every push to `main` publishes a release. With the [GitHub CLI](https://cli.github.com) logged in:
+
+```bash
+# macOS (Apple Silicon)
+gh release download -R uptive/Uptive-AgentLab -p install.sh -O - | bash
+```
+
+```powershell
+# Windows (PowerShell)
+gh release download -R uptive/Uptive-AgentLab -p install.ps1 -O - | Out-String | Invoke-Expression
+```
+
+See `docs/releasing.md` for Command Prompt, how the pipeline works, and packaging details.
+
+## Package the desktop app locally
 
 ```bash
 pnpm --filter @agentlab/desktop package:mac   # -> apps/desktop/release

@@ -109,12 +109,13 @@ async function claudeCode(home: string): Promise<McpSource[]> {
 }
 
 /** Every MCP configuration this machine has that we know how to read. Missing files are reported, not thrown. */
-export async function listMcpSources(options: { appDataDir: string; repoRoot: string; home?: string }): Promise<McpSource[]> {
+/** `repoRoot` is left out in the installed app, which has no repo. */
+export async function listMcpSources(options: { appDataDir: string; repoRoot?: string; home?: string }): Promise<McpSource[]> {
   const home = options.home ?? os.homedir();
   const groups = await Promise.all([
     claudeDesktop(options.appDataDir),
     claudeCode(home),
-    mcpFile("project", "This repo (.mcp.json)", path.join(options.repoRoot, ".mcp.json")).then((source) => [source]),
+    options.repoRoot ? mcpFile("project", "This repo (.mcp.json)", path.join(options.repoRoot, ".mcp.json")).then((source) => [source]) : Promise.resolve([]),
     mcpFile("cursor", "Cursor", path.join(home, ".cursor", "mcp.json")).then((source) => [source]),
   ]);
   return groups.flat();

@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { MongoClient, ServerApiVersion } from "mongodb";
 import {
   DEFAULT_AGENT_ROLES,
@@ -48,11 +48,10 @@ import { createHandle } from "./ipcHandle.js";
 import { NotificationSettingsStore } from "./notificationSettings.js";
 import { RunNotifier } from "./notifications.js";
 import { SecretStore } from "./secrets.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { paths } from "./paths.js";
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
-const INDEX_HTML = path.join(__dirname, "../dist/index.html");
+const INDEX_HTML = paths.indexHtml;
 
 /** The app's own page: the dev server in development, the bundled index.html when built. */
 const isAppUrl = (url: string) => (VITE_DEV_SERVER_URL ? url.startsWith(VITE_DEV_SERVER_URL) : url.startsWith(pathToFileURL(INDEX_HTML).href));
@@ -77,8 +76,8 @@ function loadEnvFile(envPath: string) {
   }
 }
 
-// Load the first .env found: apps/desktop/.env, then the repo root .env.
-for (const envPath of [path.resolve(__dirname, "../.env"), path.resolve(__dirname, "../../../.env")]) {
+// Load the first .env found: apps/desktop/.env, then the repo root .env (installed: the user data folder).
+for (const envPath of paths.envFiles()) {
   if (existsSync(envPath)) {
     loadEnvFile(envPath);
     break;
@@ -99,7 +98,11 @@ const tools = new LocalToolRegistry();
 async function connect(): Promise<Stores> {
   const uri = process.env.MONGODB_URI;
   if (!uri) {
-    throw new Error("MONGODB_URI is not set. Add it to the repo root .env file.");
+    throw new Error(
+      app.isPackaged
+        ? `MONGODB_URI is not set. Add MONGODB_URI=… to ${paths.envFiles()[0]} and restart AgentLab.`
+        : "MONGODB_URI is not set. Add it to the repo root .env file.",
+    );
   }
   const client = new MongoClient(uri, {
     serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
@@ -127,7 +130,7 @@ function getStores(): Promise<Stores> {
 // Local agents are JSON files in a git-ignored folder, read at startup and again when the renderer
 // asks for a reload. They work without MongoDB.
 const localAgents = createFileAgentStore(
-  process.env.LOCAL_AGENTS_DIR || path.resolve(__dirname, "../../../data/local-agents"),
+  paths.localAgentsDir(),
 );
 let localAgentsLoaded: Promise<void> = Promise.resolve();
 
@@ -368,11 +371,11 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry, secrets
       const [store] = await agentStoreFor(id);
       return store.get(id);
     },
-    dataDir: app.isPackaged ? app.getPath("userData") : path.resolve(__dirname, "../../../data"),
+    dataDir: paths.dataDir(),
   });
 
   ipcMain.handle(IPC.listMcp, () =>
-    listMcpSources({ appDataDir: app.getPath("appData"), repoRoot: path.resolve(__dirname, "../../..") }),
+    listMcpSources({ appDataDir: app.getPath("appData"), repoRoot: paths.repoRoot() }),
   );
 
   // Model calls for LLM-backed evaluators run here. AGENT_BACKEND=cli (default) uses the local
@@ -436,7 +439,7 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry, secrets
 }
 
 // Packaged builds get their icon from electron-builder; dev runs need it set explicitly.
-const DEV_ICON = app.isPackaged ? undefined : path.join(__dirname, "../build/icon.png");
+const DEV_ICON = paths.devIcon();
 
 let mainWindow: BrowserWindow | undefined;
 /** Set once the user has agreed to quit, so closing the window no longer hides it to the tray. */
@@ -448,7 +451,7 @@ function createWindow(notifier: RunNotifier): BrowserWindow {
     height: 900,
     icon: DEV_ICON,
     webPreferences: {
-      preload: path.join(__dirname, "preload.cjs"),
+      preload: paths.preload,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
