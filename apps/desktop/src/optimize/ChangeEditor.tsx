@@ -41,7 +41,9 @@ export function ChangeEditor({
   }, [change]);
 
   const dirty = draft !== undefined && kind !== undefined && draft !== toText(change.after, kind);
-  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
 
   if (!kind) return null;
 

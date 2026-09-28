@@ -45,7 +45,9 @@ export function RecommendationDrawer({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const dirty = useRef(false);
-  const onDirtyChange = useCallback((value: boolean) => (dirty.current = value), []);
+  const onDirtyChange = useCallback((value: boolean) => {
+    dirty.current = value;
+  }, []);
   /** Closes unless an unsaved edit is open and the user wants to keep it. */
   const requestClose = () => {
     if (dirty.current && !window.confirm("Discard your unsaved edit to this change?")) return;
