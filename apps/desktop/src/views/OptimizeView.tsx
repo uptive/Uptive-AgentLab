@@ -104,6 +104,8 @@ export function OptimizeView() {
   const [testedKeys, setTestedKeys] = useState<string[]>([]);
   /** Cards whose changes were saved during this analysis. */
   const [applied, setApplied] = useState<Set<string>>(new Set());
+  /** The user's own version of a suggested change's new value, per card. */
+  const [edits, setEdits] = useState<Map<string, unknown>>(new Map());
   const trialRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -138,6 +140,7 @@ export function OptimizeView() {
     setTrial(undefined);
     setTestedKeys([]);
     setApplied(new Set());
+    setEdits(new Map());
     try {
       const loaded = await runSource.loadRun(selectedRunId);
       setPendingInput(loaded);
@@ -191,11 +194,25 @@ export function OptimizeView() {
     for (const a of analyses) {
       for (const r of a.evaluation?.recommendations ?? []) {
         if (a.modelId !== lead && !MODEL_BACKED.has(r.category)) continue;
-        map.set(cardKey(a.modelId, r.id), { recommendation: r, modelId: a.modelId });
+        const key = cardKey(a.modelId, r.id);
+        const recommendation = edits.has(key) ? { ...r, change: { ...r.change, after: edits.get(key) } } : r;
+        map.set(key, { recommendation, modelId: a.modelId });
       }
     }
     return map;
-  }, [analyses, lead]);
+  }, [analyses, lead, edits]);
+
+  function editChange(key: string, after: unknown) {
+    setEdits((current) => new Map(current).set(key, after));
+  }
+
+  function resetChange(key: string) {
+    setEdits((current) => {
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+  }
 
   const pickedRecs = useMemo(() => picked.flatMap((key) => cards.get(key)?.recommendation ?? []), [picked, cards]);
   const plan = useMemo(() => (input && pickedRecs.length ? planChanges(input, pickedRecs) : undefined), [input, pickedRecs]);
@@ -228,8 +245,9 @@ export function OptimizeView() {
 
   const stateOf = (key: string): CardState | undefined => (applied.has(key) ? "applied" : trialActive && testedKeys.includes(key) ? "in-test" : undefined);
 
-  function renderCard(r: Recommendation, modelId: string, context?: string) {
-    const key = cardKey(modelId, r.id);
+  function renderCard(suggested: Recommendation, modelId: string, context?: string) {
+    const key = cardKey(modelId, suggested.id);
+    const r = cards.get(key)?.recommendation ?? suggested;
     return (
       <RecommendationCard
         key={key}
@@ -256,6 +274,26 @@ export function OptimizeView() {
       setTrial((t) => t && { ...t, run });
     } catch (e) {
       setTrial((t) => t && { ...t, error: `The test run didn't start: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  }
+
+  /** Skips the test run: plans the cards' changes and goes straight to reviewing where they're saved. */
+  async function applyWithoutTest(keys: string[]) {
+    if (!input) return;
+    const plan = planChanges(
+      input,
+      keys.flatMap((k) => cards.get(k)?.recommendation ?? []),
+    );
+    if (plan.edits.length === 0) return;
+    setTrial({ plan, recommendationIds: plan.edits.map((e) => e.recommendationId), untested: true });
+    setTestedKeys(keys);
+    setOpenCard(undefined);
+    requestAnimationFrame(() => trialRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    try {
+      const review = await resolveDestinations(plan);
+      setTrial((t) => t && { ...t, review });
+    } catch (e) {
+      setTrial((t) => t && { ...t, error: `Couldn't look up where to save: ${e instanceof Error ? e.message : String(e)}` });
     }
   }
 
@@ -368,6 +406,12 @@ export function OptimizeView() {
               comparing && open && MODEL_BACKED.has(open.recommendation.category)
                 ? analyses.map((a) => ({ modelId: a.modelId, recommendation: a.evaluation?.recommendations.find((r) => r.id === open.recommendation.id) }))
                 : undefined
+            }
+            edited={openCard ? edits.has(openCard) : false}
+            onEdit={(after) => openCard && editChange(openCard, after)}
+            onResetEdit={() => openCard && resetChange(openCard)}
+            onApply={
+              openCard && open && !trialActive && !notTestableReason(input, open.recommendation) ? () => applyWithoutTest([openCard]) : undefined
             }
             onClose={() => setOpenCard(undefined)}
           />
@@ -521,7 +565,7 @@ export function OptimizeView() {
             )}
           </section>
 
-          {plan && !trial ? <ChangeTray plan={plan} busy={trialActive} onTest={startTrial} onClear={() => setPicked([])} /> : null}
+          {plan && !trial ? <ChangeTray plan={plan} busy={trialActive} onTest={startTrial} onApply={() => applyWithoutTest(picked)} onClear={() => setPicked([])} /> : null}
         </>
       ) : null}
     </div>

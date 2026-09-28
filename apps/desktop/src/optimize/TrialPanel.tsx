@@ -3,10 +3,12 @@ import type { Run, StepRun } from "@agentlab/contracts";
 import { FIELD_LABELS, getModel, type ChangePlan, type EvaluationInput, type PlannedEdit } from "@agentlab/optimization";
 import type { ApplyResult, Destination, FlowLocation } from "./trial.js";
 
-/** The test of a set of changes, from start to applied. */
+/** The test of a set of changes, from start to applied, or applying them straight away without a test. */
 export interface TrialState {
   plan: ChangePlan;
   recommendationIds: string[];
+  /** Applied without a test run: goes straight to the review. */
+  untested?: boolean;
   /** Live snapshot of the test run; its final state once finished. */
   run?: Run;
   error?: string;
@@ -82,11 +84,14 @@ export function EditList({ edits }: { edits: PlannedEdit[] }) {
 export function ChangeTray({
   plan,
   onTest,
+  onApply,
   onClear,
   busy,
 }: {
   plan: ChangePlan;
   onTest: () => void;
+  /** Reviews and saves the changes without a test run. */
+  onApply: () => void;
   onClear: () => void;
   busy: boolean;
 }) {
@@ -103,6 +108,9 @@ export function ChangeTray({
         </button>
         <button className="opt-link" onClick={onClear}>
           Clear
+        </button>
+        <button className="opt-link" disabled={busy || count === 0} onClick={onApply}>
+          Apply without testing…
         </button>
         <button className="opt-primary" disabled={busy || count === 0} onClick={onTest}>
           Test {count === 1 ? "change" : "changes"}
@@ -172,10 +180,21 @@ export function TrialPanel({
   onCancelApply: () => void;
   onDiscard: () => void;
 }) {
-  const { plan, run, error, review, results } = trial;
+  const { plan, run, error, review, results, untested } = trial;
   const finished = run && (run.status === "completed" || run.status === "failed");
   const applied = Boolean(results);
-  const stateLabel = applied ? "Applied" : error ? "Test didn't start" : !finished ? "Testing…" : run!.status === "failed" ? "Test run failed · not applied" : "Tested · not applied";
+  const stateLabel = applied
+    ? "Applied"
+    : untested
+      ? "Not tested · not applied"
+      : error
+        ? "Test didn't start"
+        : !finished
+          ? "Testing…"
+          : run!.status === "failed"
+            ? "Test run failed · not applied"
+            : "Tested · not applied";
+  const count = `${plan.edits.length} change${plan.edits.length === 1 ? "" : "s"}`;
   const nameOf = (nodeId: string) => {
     const node = plan.flow.nodes.find((n) => n.id === nodeId);
     return node?.label ?? plan.agents.find((a) => a.id === node?.agentId)?.name ?? nodeId;
@@ -189,19 +208,27 @@ export function TrialPanel({
   return (
     <section className={`opt-section opt-trial${applied ? " is-applied" : ""}`} aria-labelledby="opt-trial-title">
       <div className="opt-section-head">
-        <h2 id="opt-trial-title">Test of {plan.edits.length} change{plan.edits.length === 1 ? "" : "s"}</h2>
-        <span className={`opt-state ${applied ? "applied" : finished && run!.status === "completed" ? "tested" : error || run?.status === "failed" ? "failed" : "running"}`}>
+        <h2 id="opt-trial-title">{untested ? `Apply ${count}` : `Test of ${count}`}</h2>
+        <span
+          className={`opt-state ${applied ? "applied" : untested ? "running" : finished && run!.status === "completed" ? "tested" : error || run?.status === "failed" ? "failed" : "running"}`}
+        >
           {stateLabel}
         </span>
       </div>
       <p className="opt-trial-lede">
         {applied
           ? "These changes are now saved. Future runs use them."
-          : "The flow ran once with the changes below, on copies of your agents and flow. Nothing is saved until you apply."}
+          : untested
+            ? "These changes haven't been tested. Check where each one is saved, then apply. You can test them afterwards by analyzing the next run."
+            : "The flow ran once with the changes below, on copies of your agents and flow. Nothing is saved until you apply."}
       </p>
 
-      <h3 className="opt-subhead">{applied ? "What changed" : "What's changed in this test"}</h3>
-      <EditList edits={plan.edits} />
+      {untested ? null : (
+        <>
+          <h3 className="opt-subhead">{applied ? "What changed" : "What's changed in this test"}</h3>
+          <EditList edits={plan.edits} />
+        </>
+      )}
 
       {error ? <p className="opt-error">{error}</p> : null}
 
@@ -221,9 +248,27 @@ export function TrialPanel({
 
       {run && finished ? <Comparison base={base} run={run} plan={plan} nameOf={nameOf} modelOf={modelOf} /> : null}
 
+      {untested && !applied && !error ? (
+        review ? (
+          <ApplyReview review={review} applying={Boolean(trial.applying)} cancelLabel="Cancel" onConfirm={onConfirmApply} onCancel={onDiscard} />
+        ) : (
+          <p className="hint" aria-live="polite">
+            Looking up where each change is saved…
+          </p>
+        )
+      ) : null}
+
+      {untested && error && !applied ? (
+        <div className="opt-trial-actions">
+          <button className="opt-link" onClick={onDiscard}>
+            Close
+          </button>
+        </div>
+      ) : null}
+
       {run && finished && !applied ? (
         review ? (
-          <ApplyReview review={review} applying={Boolean(trial.applying)} onConfirm={onConfirmApply} onCancel={onCancelApply} />
+          <ApplyReview review={review} applying={Boolean(trial.applying)} cancelLabel="Back" onConfirm={onConfirmApply} onCancel={onCancelApply} />
         ) : (
           <div className="opt-trial-actions">
             <button className="opt-primary" onClick={onApply} disabled={run.status !== "completed"}>
@@ -357,11 +402,13 @@ const sameValue = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON
 function ApplyReview({
   review,
   applying,
+  cancelLabel,
   onConfirm,
   onCancel,
 }: {
   review: { destinations: Destination[] };
   applying: boolean;
+  cancelLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -391,7 +438,7 @@ function ApplyReview({
           {applying ? "Applying…" : `Apply ${saveable.length} change${saveable.length === 1 ? "" : "s"}`}
         </button>
         <button className="opt-link" onClick={onCancel} disabled={applying}>
-          Back
+          {cancelLabel}
         </button>
       </div>
     </div>
