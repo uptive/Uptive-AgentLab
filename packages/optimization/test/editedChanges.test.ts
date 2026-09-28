@@ -19,7 +19,7 @@ const suggestion: Recommendation = {
 
 describe("a suggested change edited by the user", () => {
   it("can't be applied while it still has placeholders", () => {
-    expect(notTestableReason(codeReviewFixture, suggestion)).toMatch(/placeholders/);
+    expect(notTestableReason(codeReviewFixture, suggestion)).toMatch(/placeholder to fill in \(<what this step must check>\)/);
     expect(planChanges(codeReviewFixture, [suggestion]).edits).toEqual([]);
   });
 
@@ -29,5 +29,14 @@ describe("a suggested change edited by the user", () => {
     const plan = planChanges(codeReviewFixture, [edited]);
     expect(plan.edits).toMatchObject([{ field: "systemInstructions", before: agent.systemInstructions, after: "Check correctness, tests and naming." }]);
     expect(plan.agents.find((a) => a.id === agent.id)?.systemInstructions).toBe("Check correctness, tests and naming.");
+  });
+
+  it("ignores placeholders the agent's own instructions already contain", () => {
+    const template = `${agent.systemInstructions}\nReview \`git -C <repoPath> diff\` and answer {"summary":"…"}.`;
+    const input = { ...codeReviewFixture, agents: codeReviewFixture.agents.map((a) => (a.id === agent.id ? { ...a, systemInstructions: template } : a)) };
+    const appended = { ...suggestion, change: { ...suggestion.change, before: template, after: `${template}\n\nRead only the lines you need.` } };
+    expect(notTestableReason(input, appended)).toBeUndefined();
+    const withNew = { ...appended, change: { ...appended.change, after: `${template}\n\nAlso check <the risky files>.` } };
+    expect(notTestableReason(input, withNew)).toMatch(/<the risky files>/);
   });
 });

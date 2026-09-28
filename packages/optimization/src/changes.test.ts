@@ -40,7 +40,7 @@ describe("planChanges", () => {
     const placeholder: Recommendation = { ...vague, change: { ...vague.change, after: "Check: <what this step must check>." } };
     expect(notTestableReason(codeReviewFixture, replace)).toBe("it needs a new step that produces the summary");
     expect(notTestableReason(codeReviewFixture, vague)).toBeUndefined();
-    expect(notTestableReason(codeReviewFixture, placeholder)).toBe("the suggested instructions contain placeholders to fill in");
+    expect(notTestableReason(codeReviewFixture, placeholder)).toBe("the suggested instructions contain a placeholder to fill in (<what this step must check>)");
 
     const plan = planChanges(codeReviewFixture, [replace]);
     expect(plan.edits).toEqual([]);
