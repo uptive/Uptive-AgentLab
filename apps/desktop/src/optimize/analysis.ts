@@ -19,6 +19,7 @@ export const EVALUATOR_LABELS: Record<string, string> = {
   quality: "Quality",
   "model-selection": "Model selection",
   "token-context": "Token & context",
+  "agent-execution": "Agent execution",
   "flow-design": "Flow design",
 };
 

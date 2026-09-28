@@ -124,11 +124,23 @@ describe("analyzeRun with model-backed evaluators", () => {
     await analyzeRun(codeReviewFixture, createEvaluators(failing), {
       onProgress: (p) => events.push(`${p.evaluatorId}:${p.status}${p.modelBacked ? "(model)" : ""}`),
     });
-    expect(events.slice(0, 4)).toEqual(["quality:running(model)", "model-selection:running(model)", "token-context:running", "flow-design:running"]);
+    expect(events.slice(0, 5)).toEqual([
+      "quality:running(model)",
+      "model-selection:running(model)",
+      "token-context:running",
+      "agent-execution:running",
+      "flow-design:running",
+    ]);
     expect(events).toEqual(
-      expect.arrayContaining(["quality:fallback(model)", "model-selection:fallback(model)", "token-context:done", "flow-design:done"]),
+      expect.arrayContaining([
+        "quality:fallback(model)",
+        "model-selection:fallback(model)",
+        "token-context:done",
+        "agent-execution:done",
+        "flow-design:done",
+      ]),
     );
-    expect(events).toHaveLength(8);
+    expect(events).toHaveLength(10);
   });
 
   it("makes one model call per model-backed evaluator", async () => {

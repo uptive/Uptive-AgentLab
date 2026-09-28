@@ -3,6 +3,7 @@ export { CATEGORIES, analyzeRun, compareRecommendations, createEvaluators, defau
 export { qualityEvaluator } from "./evaluators/quality.js";
 export { modelSelectionEvaluator } from "./evaluators/modelSelection.js";
 export { tokenContextEvaluator } from "./evaluators/tokenContext.js";
+export { agentExecutionEvaluator } from "./evaluators/agentExecution.js";
 export { flowDesignEvaluator } from "./evaluators/flowDesign.js";
 export { createQualityLlmEvaluator } from "./evaluators/qualityLlm.js";
 export { createModelSelectionLlmEvaluator } from "./evaluators/modelSelectionLlm.js";
