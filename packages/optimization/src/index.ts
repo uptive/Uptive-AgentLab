@@ -1,4 +1,17 @@
-export type { AnalyzeOptions, EvaluationInput, Evaluator, EvaluatorProgress, JsonRequest, JsonResponse, ModelCallUsage, ModelClient } from "./types.js";
+export type {
+  AnalyzeOptions,
+  EvaluationInput,
+  Evaluator,
+  EvaluatorProgress,
+  JsonRequest,
+  JsonResponse,
+  ModelAnalysis,
+  ModelCallRecord,
+  ModelCallUsage,
+  ModelClient,
+  SavedOptimization,
+  SavedOptimizationSummary,
+} from "./types.js";
 export { CATEGORIES, analyzeRun, compareRecommendations, createEvaluators, defaultEvaluators } from "./analyzeRun.js";
 export { qualityEvaluator } from "./evaluators/quality.js";
 export { modelSelectionEvaluator } from "./evaluators/modelSelection.js";

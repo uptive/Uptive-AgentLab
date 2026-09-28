@@ -1,17 +1,7 @@
-import type { EvaluationResult } from "@agentlab/contracts";
-import { EVALUATOR_MODELS, type EvaluationInput } from "@agentlab/optimization";
+import { EVALUATOR_MODELS, type EvaluationInput, type ModelAnalysis } from "@agentlab/optimization";
 import type { ModelCallRecord } from "./modelClient.js";
 
-/** One analysis of a run with one model for the model-backed evaluators. */
-export interface ModelAnalysis {
-  modelId: string;
-  evaluation?: EvaluationResult;
-  error?: string;
-  /** Every model call the evaluators made, with prompt, answer and usage. */
-  calls: ModelCallRecord[];
-  /** Wall-clock time of the whole analysis. */
-  durationMs: number;
-}
+export type { ModelAnalysis };
 
 export const modelLabel = (modelId: string) => EVALUATOR_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
 

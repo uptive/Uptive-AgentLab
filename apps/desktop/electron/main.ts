@@ -48,6 +48,7 @@ import { judgeAgentOutput } from "./agentTest.js";
 import { bridgeTokenPath, readBridgeToken } from "./bridgeToken.js";
 import { startClaudeCodeBridge, type BridgeAgentSummary, type BridgeFlowSummary, type ClaudeCodeBridge, type FlowSource } from "./claudeCodeBridge.js";
 import { createHandle } from "./ipcHandle.js";
+import { createOptimizationHistory, registerOptimizationHistoryIpc } from "./optimizationHistory.js";
 import { NotificationSettingsStore } from "./notificationSettings.js";
 import { RunNotifier } from "./notifications.js";
 import { SecretStore } from "./secrets.js";
@@ -605,6 +606,7 @@ app.whenReady().then(() => {
   notifier = runNotifier;
   runs = registerIpc(store, tools, secrets, runNotifier);
   runNotifier.registerIpc(createHandle(isAppUrl));
+  registerOptimizationHistoryIpc(createHandle(isAppUrl), createOptimizationHistory(path.join(app.getPath("userData"), "optimizations")));
   runNotifier.start().catch((error: Error) => {
     console.error("[notifications] could not load settings:", error.message);
     dialog.showErrorBox("Notification settings could not be read", `${error.message}\n\nAgentLab uses the default settings for now.`);

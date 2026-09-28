@@ -1,18 +1,6 @@
-import type { JsonRequest, ModelCallUsage, ModelClient } from "@agentlab/optimization";
+import type { JsonRequest, ModelCallRecord, ModelClient } from "@agentlab/optimization";
 
-/** One model call made by an evaluator: what was asked, what came back, and what it used. */
-export interface ModelCallRecord {
-  evaluatorId?: string;
-  model: string;
-  system: string;
-  prompt: string;
-  schema: Record<string, unknown>;
-  startedAt: string;
-  /** The model's JSON answer, when the call succeeded. */
-  response?: unknown;
-  usage?: ModelCallUsage;
-  error?: string;
-}
+export type { ModelCallRecord };
 
 /**
  * Model access for LLM-backed evaluators, on `model`, proxied to the Electron main process through

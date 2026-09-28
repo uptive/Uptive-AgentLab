@@ -1,5 +1,6 @@
 import type {
   AgentDefinition,
+  EvaluationResult,
   FlowDefinition,
   Recommendation,
   RecommendationCategory,
@@ -78,4 +79,58 @@ export interface ModelClient {
   generateJson(request: JsonRequest): Promise<unknown>;
   /** Same call, also reporting tokens, cost and duration. Backends that can measure it implement this. */
   generateJsonWithUsage?(request: JsonRequest): Promise<JsonResponse>;
+}
+
+/** One model call made by an evaluator: what was asked, what came back, and what it used. */
+export interface ModelCallRecord {
+  evaluatorId?: string;
+  model: string;
+  system: string;
+  prompt: string;
+  schema: Record<string, unknown>;
+  startedAt: string;
+  /** The model's JSON answer, when the call succeeded. */
+  response?: unknown;
+  usage?: ModelCallUsage;
+  error?: string;
+}
+
+/** One analysis of a run with one model for the model-backed evaluators. */
+export interface ModelAnalysis {
+  modelId: string;
+  evaluation?: EvaluationResult;
+  error?: string;
+  /** Every model call the evaluators made, with prompt, answer and usage. */
+  calls: ModelCallRecord[];
+  /** Wall-clock time of the whole analysis. */
+  durationMs: number;
+}
+
+/** The headline of a saved optimization, for the list of recent ones. */
+export interface SavedOptimizationSummary {
+  id: string;
+  createdAt: string;
+  runId: string;
+  flowName: string;
+  /** Models the analysis ran with, in the order picked. */
+  modelIds: string[];
+  recommendations: number;
+  highSeverity: number;
+  /** Estimated saving per run with every recommendation applied. */
+  savedUsdPerRun: number;
+  /** Recommendations whose changes were saved from this optimization. */
+  applied: number;
+}
+
+/** A finished optimization, saved on this computer so it can be reopened later. */
+export interface SavedOptimization {
+  summary: SavedOptimizationSummary;
+  /** What was analyzed, without trace events (the evaluators are done with them). */
+  input: EvaluationInput;
+  analyses: ModelAnalysis[];
+  /** Model whose analysis is shown first. */
+  analyzedWith: string;
+  /** Cards whose changes were saved, and the user's own versions of suggested changes, by card key. */
+  appliedKeys: string[];
+  edits: [string, unknown][];
 }

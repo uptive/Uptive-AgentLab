@@ -18,7 +18,7 @@ import type {
 } from "@agentlab/contracts";
 import type { ClaudeAuthStatus, McpTestResult } from "@agentlab/agent-runtime/claude";
 import type { AsyncTelemetryStore, PersistedState, RunListing } from "@agentlab/observability";
-import type { JsonRequest, JsonResponse } from "@agentlab/optimization";
+import type { JsonRequest, JsonResponse, SavedOptimization, SavedOptimizationSummary } from "@agentlab/optimization";
 import type { NotificationSettings } from "./notificationSettings.js";
 import type { OptimizationSummary, RunOutcome } from "./notificationState.js";
 
@@ -412,6 +412,14 @@ export interface AgentLabApi {
     /** The model's JSON answer plus the tokens, cost and time the call used. */
     generateJson(request: JsonRequest): Promise<JsonResponse>;
   };
+  /** Finished Optimize analyses, saved on this computer (<userData>/optimizations). */
+  optimizations: {
+    /** Saves or replaces one, by its summary id. */
+    save(record: SavedOptimization): Promise<void>;
+    /** The most recent ones, newest first, plus any recent files that couldn't be read. */
+    listRecent(): Promise<{ items: SavedOptimizationSummary[]; unreadable: { file: string; reason: string }[] }>;
+    get(id: string): Promise<SavedOptimization | undefined>;
+  };
 }
 
 export const IPC = {
@@ -469,6 +477,9 @@ export const IPC = {
   previewNotificationSound: "notifications:previewSound",
   notifyOptimization: "notifications:optimizationFinished",
   takeOpenTarget: "notifications:takeOpenTarget",
+  saveOptimization: "optimizations:save",
+  listOptimizations: "optimizations:listRecent",
+  getOptimization: "optimizations:get",
   /** main -> renderer: NotificationStatus after any change. */
   notificationStatus: "notifications:status",
   /** main -> renderer: no payload; the renderer calls takeOpenTarget. */

@@ -125,6 +125,11 @@ const api: AgentLabApi = {
   optimization: {
     generateJson: (request) => ipcRenderer.invoke(IPC.generateJson, request),
   },
+  optimizations: {
+    save: (record) => ipcRenderer.invoke(IPC.saveOptimization, record),
+    listRecent: () => ipcRenderer.invoke(IPC.listOptimizations),
+    get: (id) => ipcRenderer.invoke(IPC.getOptimization, id),
+  },
   notifications: {
     status: () => ipcRenderer.invoke(IPC.getNotificationStatus),
     save: (settings) => ipcRenderer.invoke(IPC.saveNotificationSettings, settings),
