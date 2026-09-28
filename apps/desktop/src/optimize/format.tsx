@@ -5,6 +5,7 @@ export const CATEGORY_LABELS: Record<RecommendationCategory, string> = {
   quality: "Quality",
   "model-selection": "Model selection",
   "token-context": "Token & context",
+  execution: "Agent execution",
   "flow-design": "Flow design",
 };
 

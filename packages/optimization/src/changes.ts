@@ -43,9 +43,23 @@ export const FIELD_LABELS: Record<EditField, string> = {
 };
 
 /** Placeholders like `<what this step must check>` or `…` mark a suggestion a person still has to fill in. */
-const PLACEHOLDER = /<[^<>\n]{3,80}>|…/;
+const PLACEHOLDER = /<[^<>\n]{3,80}>|…/g;
 
-const hasPlaceholder = (value: unknown) => PLACEHOLDER.test(typeof value === "string" ? value : JSON.stringify(value) ?? "");
+const placeholdersIn = (value: unknown): string[] => [...(typeof value === "string" ? value : (JSON.stringify(value) ?? "")).matchAll(PLACEHOLDER)].map((m) => m[0]);
+
+/**
+ * The first placeholder the suggestion adds. Ones already in the current value (e.g. `<repoPath>` in
+ * an agent's own instructions) are part of what the agent is given, not something left to fill in.
+ */
+function addedPlaceholder(before: unknown, after: unknown): string | undefined {
+  const existing = new Set(placeholdersIn(before));
+  return placeholdersIn(after).find((p) => !existing.has(p));
+}
+
+const placeholderReason = (kind: string, before: unknown, after: unknown) => {
+  const placeholder = addedPlaceholder(before, after);
+  return placeholder ? `the suggested ${kind} contain a placeholder to fill in (${placeholder})` : undefined;
+};
 
 /** Why a recommendation can't be tried automatically, or undefined when it can. */
 export function notTestableReason(input: EvaluationInput, r: Recommendation): string | undefined {
@@ -64,7 +78,7 @@ export function notTestableReason(input: EvaluationInput, r: Recommendation): st
     }
     case "edit-instructions":
       if (!agent) return "the agent isn't part of this run";
-      return hasPlaceholder(change.after) ? "the suggested instructions contain placeholders to fill in" : undefined;
+      return placeholderReason("instructions", agent.systemInstructions, change.after);
     case "remove-input":
     case "set-dependencies":
       return node ? undefined : "the step isn't part of this flow";
@@ -76,7 +90,7 @@ export function notTestableReason(input: EvaluationInput, r: Recommendation): st
       return outside?.kind === "node" ? `it reads from ${outside.nodeId}, which this step doesn't run after` : undefined;
     }
     case "extend-run-input":
-      return hasPlaceholder(change.after) ? "the suggested input fields contain placeholders to fill in" : undefined;
+      return placeholderReason("input fields", input.run.input, change.after);
     case "replace-input":
       return "it needs a new step that produces the summary";
     case "add-node":

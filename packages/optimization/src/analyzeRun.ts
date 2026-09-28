@@ -14,21 +14,34 @@ import { createQualityLlmEvaluator } from "./evaluators/qualityLlm.js";
 import { modelSelectionEvaluator } from "./evaluators/modelSelection.js";
 import { qualityEvaluator } from "./evaluators/quality.js";
 import { tokenContextEvaluator } from "./evaluators/tokenContext.js";
+import { agentExecutionEvaluator } from "./evaluators/agentExecution.js";
 import { criticalPathMs, scheduleMs, totalRunCostUsd } from "./helpers.js";
 import type { AnalyzeOptions, EvaluationInput, Evaluator, EvaluatorProgress, ModelClient } from "./types.js";
 
 /** Rule-based evaluators; need no model. */
-export const defaultEvaluators: Evaluator[] = [qualityEvaluator, modelSelectionEvaluator, tokenContextEvaluator, flowDesignEvaluator];
+export const defaultEvaluators: Evaluator[] = [
+  qualityEvaluator,
+  modelSelectionEvaluator,
+  tokenContextEvaluator,
+  agentExecutionEvaluator,
+  flowDesignEvaluator,
+];
 
 /**
  * Quality and Model Selection judged by a model through `client` (each falls back to its rules if
- * the model is unavailable); Token & Context and Flow Design stay rule-based.
+ * the model is unavailable); Token & Context, Agent execution and Flow Design stay rule-based.
  */
 export function createEvaluators(client: ModelClient): Evaluator[] {
-  return [createQualityLlmEvaluator(client), createModelSelectionLlmEvaluator(client), tokenContextEvaluator, flowDesignEvaluator];
+  return [
+    createQualityLlmEvaluator(client),
+    createModelSelectionLlmEvaluator(client),
+    tokenContextEvaluator,
+    agentExecutionEvaluator,
+    flowDesignEvaluator,
+  ];
 }
 
-export const CATEGORIES: RecommendationCategory[] = ["quality", "model-selection", "token-context", "flow-design"];
+export const CATEGORIES: RecommendationCategory[] = ["quality", "model-selection", "token-context", "execution", "flow-design"];
 
 const SEVERITY_ORDER: Record<RecommendationSeverity, number> = { high: 0, medium: 1, low: 2 };
 const TOP_FIXES = 3;

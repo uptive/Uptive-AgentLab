@@ -1,5 +1,5 @@
 /** The kind of analysis that produced a recommendation. One evaluator per category. */
-export type RecommendationCategory = "quality" | "model-selection" | "token-context" | "flow-design";
+export type RecommendationCategory = "quality" | "model-selection" | "token-context" | "execution" | "flow-design";
 
 export type RecommendationSeverity = "high" | "medium" | "low";
 
@@ -19,6 +19,7 @@ export const RECOMMENDATION_TAGS = [
   "Responsibility",
   "Handoff",
   "Validation",
+  "Tools",
 ] as const;
 
 export type RecommendationTag = (typeof RECOMMENDATION_TAGS)[number];

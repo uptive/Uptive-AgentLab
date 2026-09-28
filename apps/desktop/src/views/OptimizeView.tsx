@@ -30,11 +30,32 @@ import { RecommendationCard, type CardPick, type CardState } from "../optimize/R
 import { RecommendationDrawer } from "../optimize/RecommendationDrawer.js";
 import { createModelClient, type ModelCallRecord } from "../optimize/modelClient.js";
 import { RawDataDrawer } from "../optimize/RawDataDrawer.js";
+import { loadOptimization, newOptimizationId, saveOptimization, toSavedOptimization, useRecentOptimizations } from "../optimize/history.js";
+import { RecentOptimizations } from "../optimize/RecentOptimizations.js";
 import { runSource, type RunSummary } from "../optimize/runSource.js";
 import { reportOptimizationFinished } from "../notifications/bridge.js";
 import "./OptimizeView.css";
 
 const DEFAULT_MODEL_KEY = "agentlab.optimize.defaultModel";
+/** The saved optimization open in this app session, so coming back to Optimize shows it again. */
+const OPEN_OPTIMIZATION_KEY = "agentlab.optimize.open";
+
+function rememberOpen(id: string | undefined) {
+  try {
+    if (id) sessionStorage.setItem(OPEN_OPTIMIZATION_KEY, id);
+    else sessionStorage.removeItem(OPEN_OPTIMIZATION_KEY);
+  } catch {
+    // Storage unavailable: Optimize opens on the list instead.
+  }
+}
+
+function rememberedOpen(): string | undefined {
+  try {
+    return sessionStorage.getItem(OPEN_OPTIMIZATION_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function loadDefaultModel(): string {
   try {
@@ -104,6 +125,12 @@ export function OptimizeView() {
   const [testedKeys, setTestedKeys] = useState<string[]>([]);
   /** Cards whose changes were saved during this analysis. */
   const [applied, setApplied] = useState<Set<string>>(new Set());
+  /** The user's own version of a suggested change's new value, per card. */
+  const [edits, setEdits] = useState<Map<string, unknown>>(new Map());
+  /** Id and creation time of the saved optimization on screen. */
+  const [saved, setSaved] = useState<{ id: string; createdAt: string }>();
+  const recent = useRecentOptimizations();
+  const openRequest = useRef(0);
   const trialRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -117,7 +144,67 @@ export function OptimizeView() {
       setRuns(list);
       setSelectedRunId((current) => current || list[0]?.runId || "");
     });
+    const reopen = rememberedOpen();
+    if (reopen) void openSaved(reopen);
+    // Runs once on mount: reopen what was open before leaving Optimize.
   }, []);
+
+  /** Writes the optimization on screen to disk, with `changes` applied over the current state. */
+  async function persist(changes: { appliedKeys?: Set<string>; edits?: Map<string, unknown> } = {}, target = saved) {
+    if (!input || !target || !analyzedWith) return;
+    try {
+      await saveOptimization(
+        toSavedOptimization({ ...target, input, analyses, analyzedWith, appliedKeys: changes.appliedKeys ?? applied, edits: changes.edits ?? edits }),
+      );
+      await recent.refresh();
+    } catch (e) {
+      setError(`Couldn't save this optimization: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** Shows a saved optimization again, as it was left: its result, applied changes and edits. */
+  async function openSaved(id: string) {
+    const request = ++openRequest.current;
+    setError(undefined);
+    try {
+      const record = await loadOptimization(id);
+      if (request !== openRequest.current) return;
+      const shown = record.analyses.find((a) => a.modelId === record.analyzedWith)?.evaluation ?? record.analyses.find((a) => a.evaluation)?.evaluation;
+      setInput(record.input);
+      setAnalyses(record.analyses);
+      setResult(shown);
+      setAnalyzedWith(record.analyzedWith);
+      setApplied(new Set(record.appliedKeys));
+      setEdits(new Map(record.edits));
+      setSaved({ id: record.summary.id, createdAt: record.summary.createdAt });
+      setSelectedRunId((current) => (runs.some((r) => r.runId === record.summary.runId) ? record.summary.runId : current));
+      setCategoryFilter(undefined);
+      setTagFilter(undefined);
+      setNodeFilter(undefined);
+      setOpenCard(undefined);
+      setPicked([]);
+      setTrial(undefined);
+      setTestedKeys([]);
+      rememberOpen(id);
+    } catch (e) {
+      if (request !== openRequest.current) return;
+      rememberOpen(undefined);
+      setError(`Couldn't open this optimization: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** Back to the list of recent optimizations. */
+  function closeSaved() {
+    openRequest.current++;
+    setResult(undefined);
+    setInput(undefined);
+    setAnalyses([]);
+    setSaved(undefined);
+    setTrial(undefined);
+    setPicked([]);
+    setOpenCard(undefined);
+    rememberOpen(undefined);
+  }
 
   /** Analyzes the selected run with each of `modelIds` at the same time. */
   async function handleAnalyze(modelIds: string[]) {
@@ -138,6 +225,10 @@ export function OptimizeView() {
     setTrial(undefined);
     setTestedKeys([]);
     setApplied(new Set());
+    setEdits(new Map());
+    setSaved(undefined);
+    openRequest.current++;
+    rememberOpen(undefined);
     try {
       const loaded = await runSource.loadRun(selectedRunId);
       setPendingInput(loaded);
@@ -166,6 +257,18 @@ export function OptimizeView() {
       setAnalyses(results);
       setResult(shown.evaluation);
       setAnalyzedWith(shown.modelId);
+      // Saved right away, so the result survives leaving Optimize.
+      const target = { id: newOptimizationId(), createdAt: new Date().toISOString() };
+      setSaved(target);
+      rememberOpen(target.id);
+      try {
+        await saveOptimization(
+          toSavedOptimization({ ...target, input: loaded, analyses: results, analyzedWith: shown.modelId, appliedKeys: [], edits: new Map() }),
+        );
+        await recent.refresh();
+      } catch (e) {
+        setError(`The analysis finished, but it couldn't be saved: ${e instanceof Error ? e.message : String(e)}`);
+      }
       // Main shows a notification only if the user switched to another app while this ran.
       const evaluation = shown.evaluation!;
       reportOptimizationFinished({
@@ -191,11 +294,26 @@ export function OptimizeView() {
     for (const a of analyses) {
       for (const r of a.evaluation?.recommendations ?? []) {
         if (a.modelId !== lead && !MODEL_BACKED.has(r.category)) continue;
-        map.set(cardKey(a.modelId, r.id), { recommendation: r, modelId: a.modelId });
+        const key = cardKey(a.modelId, r.id);
+        const recommendation = edits.has(key) ? { ...r, change: { ...r.change, after: edits.get(key) } } : r;
+        map.set(key, { recommendation, modelId: a.modelId });
       }
     }
     return map;
-  }, [analyses, lead]);
+  }, [analyses, lead, edits]);
+
+  function editChange(key: string, after: unknown) {
+    const next = new Map(edits).set(key, after);
+    setEdits(next);
+    void persist({ edits: next });
+  }
+
+  function resetChange(key: string) {
+    const next = new Map(edits);
+    next.delete(key);
+    setEdits(next);
+    void persist({ edits: next });
+  }
 
   const pickedRecs = useMemo(() => picked.flatMap((key) => cards.get(key)?.recommendation ?? []), [picked, cards]);
   const plan = useMemo(() => (input && pickedRecs.length ? planChanges(input, pickedRecs) : undefined), [input, pickedRecs]);
@@ -228,8 +346,9 @@ export function OptimizeView() {
 
   const stateOf = (key: string): CardState | undefined => (applied.has(key) ? "applied" : trialActive && testedKeys.includes(key) ? "in-test" : undefined);
 
-  function renderCard(r: Recommendation, modelId: string, context?: string) {
-    const key = cardKey(modelId, r.id);
+  function renderCard(suggested: Recommendation, modelId: string, context?: string) {
+    const key = cardKey(modelId, suggested.id);
+    const r = cards.get(key)?.recommendation ?? suggested;
     return (
       <RecommendationCard
         key={key}
@@ -259,6 +378,26 @@ export function OptimizeView() {
     }
   }
 
+  /** Skips the test run: plans the cards' changes and goes straight to reviewing where they're saved. */
+  async function applyWithoutTest(keys: string[]) {
+    if (!input) return;
+    const plan = planChanges(
+      input,
+      keys.flatMap((k) => cards.get(k)?.recommendation ?? []),
+    );
+    if (plan.edits.length === 0) return;
+    setTrial({ plan, recommendationIds: plan.edits.map((e) => e.recommendationId), untested: true });
+    setTestedKeys(keys);
+    setOpenCard(undefined);
+    requestAnimationFrame(() => trialRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    try {
+      const review = await resolveDestinations(plan);
+      setTrial((t) => t && { ...t, review });
+    } catch (e) {
+      setTrial((t) => t && { ...t, error: `Couldn't look up where to save: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  }
+
   async function reviewApply() {
     if (!trial) return;
     try {
@@ -275,7 +414,9 @@ export function OptimizeView() {
     const results = await applyPlan(trial.plan, trial.review.destinations, trial.review.flow);
     setTrial((t) => t && { ...t, applying: false, results });
     const savedIds = new Set(results.filter((r) => r.ok).map((r) => r.edit.recommendationId));
-    setApplied((current) => new Set([...current, ...testedKeys.filter((k) => savedIds.has(cards.get(k)?.recommendation.id ?? ""))]));
+    const nextApplied = new Set([...applied, ...testedKeys.filter((k) => savedIds.has(cards.get(k)?.recommendation.id ?? ""))]);
+    setApplied(nextApplied);
+    await persist({ appliedKeys: nextApplied });
   }
 
   function closeTrial() {
@@ -369,6 +510,12 @@ export function OptimizeView() {
                 ? analyses.map((a) => ({ modelId: a.modelId, recommendation: a.evaluation?.recommendations.find((r) => r.id === open.recommendation.id) }))
                 : undefined
             }
+            edited={openCard ? edits.has(openCard) : false}
+            onEdit={(after) => openCard && editChange(openCard, after)}
+            onResetEdit={() => openCard && resetChange(openCard)}
+            onApply={
+              openCard && open && !trialActive && !notTestableReason(input, open.recommendation) ? () => applyWithoutTest([openCard]) : undefined
+            }
             onClose={() => setOpenCard(undefined)}
           />
         </>
@@ -377,9 +524,22 @@ export function OptimizeView() {
       {error ? <p className="opt-error">{error}</p> : null}
       {analyzing ? <AnalysisProgress input={pendingInput} progress={progress} elapsedMs={now - startedAt} /> : null}
       {!result && !analyzing && !error ? <p className="opt-empty">Pick a run and analyze it to see what to change.</p> : null}
+      {!result && !analyzing ? (
+        <RecentOptimizations
+          items={recent.data}
+          unreadable={recent.unreadable}
+          loading={recent.loading}
+          error={recent.error}
+          openId={saved?.id}
+          onOpen={(id) => void openSaved(id)}
+        />
+      ) : null}
 
       {input && result && !analyzing ? (
         <>
+          <button className="opt-link opt-back" onClick={closeSaved}>
+            ← Recent optimizations
+          </button>
           <Headline
             input={input}
             result={result}
@@ -521,7 +681,7 @@ export function OptimizeView() {
             )}
           </section>
 
-          {plan && !trial ? <ChangeTray plan={plan} busy={trialActive} onTest={startTrial} onClear={() => setPicked([])} /> : null}
+          {plan && !trial ? <ChangeTray plan={plan} busy={trialActive} onTest={startTrial} onApply={() => applyWithoutTest(picked)} onClear={() => setPicked([])} /> : null}
         </>
       ) : null}
     </div>
