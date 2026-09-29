@@ -1,5 +1,5 @@
 import type { AgentDefinition, AgentInput, AgentStore, JevQuestion } from "@agentlab/contracts";
-import { validateSourcePattern } from "./jev/sources.js";
+import { validateSourcePattern } from "./jev/validation.js";
 
 const REQUIRED_FIELDS = ["name", "role", "model"] as const;
 const QUESTION_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
