@@ -17,9 +17,13 @@ export const MODEL_CATALOG: ModelInfo[] = [
   { id: "claude-fable-5-1", label: "Claude Fable 5.1", tier: "strong", inputUsdPerMTok: 10, outputUsdPerMTok: 50 },
   { id: "claude-opus-5-5", label: "Claude Opus 5.5", tier: "strong", inputUsdPerMTok: 4, outputUsdPerMTok: 20 },
   { id: "claude-opus-5", label: "Claude Opus 5", tier: "strong", inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", tier: "balanced", inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
   { id: "claude-sonnet-5", label: "Claude Sonnet 5", tier: "balanced", inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
   { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", tier: "fast", inputUsdPerMTok: 1, outputUsdPerMTok: 5 },
 ];
+
+/** Model preselected for new agents and the model-backed evaluators. */
+export const DEFAULT_MODEL_ID: ModelId = "claude-sonnet-5-5";
 
 export function getModel(id: ModelId): ModelInfo | undefined {
   return MODEL_CATALOG.find((model) => model.id === id);

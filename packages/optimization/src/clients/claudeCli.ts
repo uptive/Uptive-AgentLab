@@ -9,7 +9,7 @@ import type { JsonRequest, JsonResponse, ModelCallUsage, ModelClient } from "../
 export interface ClaudeCliOptions {
   /** Path or name of the CLI binary. Defaults to $CLAUDE_BIN, then `claude` on PATH. */
   bin?: string;
-  /** Model id or alias passed to --model when a request names none. Defaults to $AGENT_MODEL, then Sonnet 5. */
+  /** Model id or alias passed to --model when a request names none. Defaults to $AGENT_MODEL, then Sonnet 5.5. */
   model?: string;
   /** Kill the call after this long. Defaults to 5 minutes. */
   timeoutMs?: number;

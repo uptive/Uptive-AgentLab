@@ -182,7 +182,7 @@ Order: **P0** now, **P1** this sprint, **P2** next, **P3** when touching the are
 - Fixture-specific checklist text sits in a production heuristic. `optimization/src/evaluators/quality.ts:174-178`.
 - Timers aren't cleaned up: nested `requestAnimationFrame` in `OptimizeView.tsx:391` and `setTimeout` in `SetupView.tsx:227`.
 - Nav buttons are missing `aria-current`, and the `agentlab:navigate` CustomEvent is untyped.
-- Model ids are hard-coded outside the catalog: `electron/agentDraft.ts:5`, `views/AgentsView.tsx:38`, `claude/inspect.ts:143`, `optimization/src/evaluatorModels.ts:10-15`.
+- Model ids are hard-coded outside the catalog: `electron/agentDraft.ts:5`, `claude/inspect.ts:143`, `optimization/src/evaluatorModels.ts:10-14` (the evaluator list).
 - `before-quit` doesn't await `client.close()`.
 - `timeoutMs` is silently capped at 10 minutes. `localTools.ts:313`.
 - `fileAgentStore` ids `a/b` and `a_b` map to the same file.

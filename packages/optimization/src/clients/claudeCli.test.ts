@@ -51,7 +51,7 @@ describe("Claude Code CLI model client", () => {
     }
   });
 
-  it("uses the request's model, then the default Sonnet 5", async () => {
+  it("uses the request's model, then the default Sonnet 5.5", async () => {
     const bin = fakeCli(`process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "{}",
       structured_output: { model: process.argv[process.argv.indexOf("--model") + 1] } }));`);
     const client = createClaudeCliModelClient({ bin });
@@ -59,7 +59,7 @@ describe("Claude Code CLI model client", () => {
     const saved = process.env.AGENT_MODEL;
     delete process.env.AGENT_MODEL;
     try {
-      await expect(createClaudeCliModelClient({ bin }).generateJson(request)).resolves.toEqual({ model: "claude-sonnet-5" });
+      await expect(createClaudeCliModelClient({ bin }).generateJson(request)).resolves.toEqual({ model: "claude-sonnet-5-5" });
     } finally {
       if (saved !== undefined) process.env.AGENT_MODEL = saved;
     }
