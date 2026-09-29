@@ -1,6 +1,6 @@
 import type { FlowDefinition, Run, StepRun, TraceEvent } from "@agentlab/contracts";
 import { buildActivity, eventBlocks, type ActivityBlock, type LiveStep } from "../liveRuns.js";
-import { formatMs, formatUsd, stepLatencyMs } from "./format.js";
+import { formatMs, formatTokens, formatUsd, stepLatencyMs } from "./format.js";
 import { summarizeToolCall, toolDisplayName } from "./toolSummary.js";
 
 // Everything that happened in a run as one chronological feed: steps starting and finishing, each
@@ -26,7 +26,7 @@ const time = (iso: string | undefined) => (iso ? new Date(iso).getTime() : Numbe
 function stepResult(step: StepRun): string {
   const parts = [formatMs(step.usage?.latencyMs ?? stepLatencyMs(step))];
   if (step.usage) {
-    parts.push(`${(step.usage.inputTokens + step.usage.outputTokens).toLocaleString()} tokens`);
+    parts.push(formatTokens(step.usage.inputTokens + step.usage.outputTokens, step.usage.cacheReadTokens, "tokens"));
     parts.push(formatUsd(step.usage.estimatedCostUsd));
   }
   return parts.join(" · ");

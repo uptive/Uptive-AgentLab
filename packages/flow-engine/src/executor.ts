@@ -219,6 +219,7 @@ function sumUsage(steps: StepRun[], wallClockMs: number): Usage {
   const total = steps.reduce<Usage>(
     (acc, s) => ({
       inputTokens: acc.inputTokens + (s.usage?.inputTokens ?? 0),
+      cacheReadTokens: (acc.cacheReadTokens ?? 0) + (s.usage?.cacheReadTokens ?? 0),
       outputTokens: acc.outputTokens + (s.usage?.outputTokens ?? 0),
       estimatedCostUsd: acc.estimatedCostUsd + (s.usage?.estimatedCostUsd ?? 0),
       latencyMs: 0,

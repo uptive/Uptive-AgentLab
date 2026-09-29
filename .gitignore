@@ -12,3 +12,6 @@ release/
 package-lock.json
 data/local-agents/
 apps/desktop/build/claude/
+.claude/worktrees/
+*.swp
+data/agents/

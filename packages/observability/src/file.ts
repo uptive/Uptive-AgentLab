@@ -3,7 +3,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Run, TraceEvent } from "@agentlab/contracts";
-import { PERSISTED_STATE_VERSION, type AsyncTelemetryStore, type PersistedState } from "./index.js";
+import { PERSISTED_STATE_VERSION, withCacheReadsFromTrace, type AsyncTelemetryStore, type PersistedState } from "./index.js";
 
 interface RunFile {
   run: Run;
@@ -37,7 +37,8 @@ export function createFileTelemetryStore(dir: string): FileTelemetryStore {
         const text = await fs.readFile(path.join(dir, name), "utf8");
         const file = JSON.parse(text) as RunFile;
         if (!file?.run?.id) throw new Error("missing run id");
-        loaded.set(file.run.id, { run: file.run, events: Array.isArray(file.events) ? file.events : [] });
+        const events = Array.isArray(file.events) ? file.events : [];
+        loaded.set(file.run.id, { run: withCacheReadsFromTrace(file.run, events), events });
         written.set(file.run.id, text);
       } catch (error) {
         console.warn(`[telemetry] skipping ${name}: ${(error as Error).message}`);

@@ -9,6 +9,12 @@ export function formatUsd(usd: number): string {
   return `$${usd.toFixed(4)}`;
 }
 
+/** A token count with the part read from the prompt cache in parentheses, e.g. "12,345 tok (8,000 cached)". */
+export function formatTokens(tokens: number, cached?: number, unit = ""): string {
+  const count = `${tokens.toLocaleString("en-US")}${unit ? ` ${unit}` : ""}`;
+  return cached ? `${count} (${cached.toLocaleString("en-US")} cached)` : count;
+}
+
 export function formatRelative(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (Number.isNaN(diff)) return "-";

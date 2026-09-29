@@ -9,7 +9,7 @@ import { EditorContext, type EditorContextValue } from "../flow-editor/EditorCon
 import { FlowEdge } from "../flow-editor/FlowEdge.js";
 import { edgeId, flowToGraph, type AgentFlowNode } from "../flow-editor/graphMapping.js";
 import type { DemoFrame, DemoNodeFrame } from "../flow-editor/useDemoRun.js";
-import { formatMs, formatUsd, stepLatencyMs } from "./format.js";
+import { formatMs, formatTokens, formatUsd, stepLatencyMs } from "./format.js";
 
 const nodeTypes = { agent: AgentNode };
 const edgeTypes = { flow: FlowEdge };
@@ -89,7 +89,7 @@ function nodeFrame(step: StepRun | undefined, arrived: number, total: number, no
   const base = { arrived, total };
   if (!step) return { ...base, state: "idle", progress: 0 };
   const latency = stepLatencyMs(step, now);
-  const tokens = step.usage ? `${(step.usage.inputTokens + step.usage.outputTokens).toLocaleString()} tok` : undefined;
+  const tokens = step.usage ? formatTokens(step.usage.inputTokens + step.usage.outputTokens, step.usage.cacheReadTokens, "tok") : undefined;
 
   switch (step.status) {
     case "completed":

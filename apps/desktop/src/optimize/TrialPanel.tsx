@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Run, StepRun } from "@agentlab/contracts";
 import { FIELD_LABELS, getModel, type ChangePlan, type EvaluationInput, type PlannedEdit } from "@agentlab/optimization";
+import { formatTokens } from "../runs/format.js";
 import type { ApplyResult, Destination, FlowLocation } from "./trial.js";
 
 /** The test of a set of changes, from start to applied, or applying them straight away without a test. */
@@ -152,9 +153,10 @@ function delta(before: number, after: number, format: (v: number) => string): { 
 function runTotals(run: Run) {
   const steps = run.steps;
   const tokens = steps.reduce((sum, s) => sum + (s.usage ? s.usage.inputTokens + s.usage.outputTokens : 0), 0);
+  const cached = run.totalUsage?.cacheReadTokens ?? steps.reduce((sum, s) => sum + (s.usage?.cacheReadTokens ?? 0), 0);
   const cost = run.totalUsage?.estimatedCostUsd ?? steps.reduce((sum, s) => sum + (s.usage?.estimatedCostUsd ?? 0), 0);
   const latency = run.totalUsage?.latencyMs ?? (run.completedAt ? Date.parse(run.completedAt) - Date.parse(run.startedAt) : 0);
-  return { tokens, cost, latency, failed: steps.filter((s) => s.status === "failed").length };
+  return { tokens, cached, cost, latency, failed: steps.filter((s) => s.status === "failed").length };
 }
 
 /** Outputs of the steps nothing else depends on: what the run produced. */
@@ -304,7 +306,7 @@ function Comparison({
   const rows = [
     { label: "Run time", before: secs(a.latency), after: secs(b.latency), d: delta(a.latency, b.latency, secs) },
     { label: "Cost (estimated)", before: usd(a.cost), after: usd(b.cost), d: delta(a.cost, b.cost, usd) },
-    { label: "Tokens", before: a.tokens.toLocaleString("en-US"), after: b.tokens.toLocaleString("en-US"), d: delta(a.tokens, b.tokens, (v) => v.toLocaleString("en-US")) },
+    { label: "Tokens", before: formatTokens(a.tokens, a.cached), after: formatTokens(b.tokens, b.cached), d: delta(a.tokens, b.tokens, (v) => v.toLocaleString("en-US")) },
     { label: "Failed steps", before: String(a.failed), after: String(b.failed), d: { text: b.failed > a.failed ? "worse" : b.failed < a.failed ? "better" : "", better: b.failed <= a.failed ? undefined : false } },
   ];
   const [outBefore, outAfter] = [finalOutputs(base.run, base.flow.nodes), finalOutputs(run, plan.flow.nodes)];

@@ -3,7 +3,7 @@ import type { Run, RunStatus } from "@agentlab/contracts";
 import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
 import { theme } from "../theme.js";
 import type { Catalog } from "./catalog.js";
-import { formatMs, formatRelative, formatUsd } from "./format.js";
+import { formatMs, formatRelative, formatTokens, formatUsd } from "./format.js";
 import { stopRun } from "./runLauncher.js";
 import { EMPTY_RUN_FILTER, filterRuns, type RunFilter } from "./runLists.js";
 import { StatusBadge, buttonStyle, fieldStyle, resolveRunFlow } from "./runUi.js";
@@ -56,7 +56,7 @@ function RunRow({
       </div>
       <StatusBadge status={summary.status} />
       <span style={{ fontSize: 13 }}>{formatMs(summary.durationMs)}</span>
-      <span style={{ fontSize: 13 }}>{(summary.inputTokens + summary.outputTokens).toLocaleString()} tok</span>
+      <span style={{ fontSize: 13 }}>{formatTokens(summary.inputTokens + summary.outputTokens, summary.cacheReadTokens, "tok")}</span>
       <span style={{ fontSize: 13 }}>{formatUsd(summary.estimatedCostUsd)}</span>
       {run.status === "running" ? (
         <button

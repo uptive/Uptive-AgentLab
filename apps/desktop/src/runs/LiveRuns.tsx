@@ -4,7 +4,7 @@ import { summarizeRun } from "@agentlab/observability";
 import { theme } from "../theme.js";
 import { useLiveSteps, type LiveStep } from "../liveRuns.js";
 import type { Catalog } from "./catalog.js";
-import { formatMs, formatUsd } from "./format.js";
+import { formatMs, formatTokens, formatUsd } from "./format.js";
 import { stopRun } from "./runLauncher.js";
 import { activeRuns } from "./runLists.js";
 import { buttonStyle, resolveRunFlow, useNow } from "./runUi.js";
@@ -117,7 +117,7 @@ function RunCard({ run, catalog, now, onOpen }: { run: Run; catalog: Catalog; no
           <span>
             {completed} / {total} steps
           </span>
-          <span>{tokens.toLocaleString()} tok</span>
+          <span>{formatTokens(tokens, summary.cacheReadTokens, "tok")}</span>
           <span>{formatUsd(summary.estimatedCostUsd)}</span>
         </div>
       </div>
@@ -175,6 +175,7 @@ export function LiveRuns({ runs, catalog, onOpen }: { runs: Run[]; catalog: Cata
   const active = activeRuns(runs);
   const totals = active.map((run) => summarizeRun(run));
   const totalTokens = totals.reduce((sum, s) => sum + s.inputTokens + s.outputTokens, 0);
+  const totalCached = totals.reduce((sum, s) => sum + s.cacheReadTokens, 0);
   const totalCost = totals.reduce((sum, s) => sum + s.estimatedCostUsd, 0);
 
   return (
@@ -187,7 +188,7 @@ export function LiveRuns({ runs, catalog, onOpen }: { runs: Run[]; catalog: Cata
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13 }}>
             <span>
-              <strong>{active.length}</strong> running · {totalTokens.toLocaleString()} tok · {formatUsd(totalCost)}
+              <strong>{active.length}</strong> running · {formatTokens(totalTokens, totalCached, "tok")} · {formatUsd(totalCost)}
             </span>
             <span style={{ marginLeft: "auto" }}>
               <StopAllButton runs={active} />

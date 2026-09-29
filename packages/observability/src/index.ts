@@ -239,6 +239,8 @@ export interface RunSummary {
   status: Run["status"];
   durationMs?: number;
   inputTokens: number;
+  /** Part of `inputTokens` read from the prompt cache. */
+  cacheReadTokens: number;
   outputTokens: number;
   estimatedCostUsd: number;
   agentIds: string[];
@@ -260,6 +262,7 @@ export function summarizeRun(run: Run, events?: TraceEvent[]): RunSummary {
     status: run.status,
     durationMs,
     inputTokens: run.totalUsage?.inputTokens ?? 0,
+    cacheReadTokens: run.totalUsage?.cacheReadTokens ?? 0,
     outputTokens: run.totalUsage?.outputTokens ?? 0,
     estimatedCostUsd: run.totalUsage?.estimatedCostUsd ?? 0,
     agentIds: [],
@@ -272,6 +275,7 @@ export function summarizeRun(run: Run, events?: TraceEvent[]): RunSummary {
     seenAgents.add(step.agentId);
     if (!run.totalUsage && step.usage) {
       summary.inputTokens += step.usage.inputTokens;
+      summary.cacheReadTokens += step.usage.cacheReadTokens ?? 0;
       summary.outputTokens += step.usage.outputTokens;
       summary.estimatedCostUsd += step.usage.estimatedCostUsd;
     }
@@ -292,6 +296,31 @@ export function summarizeRun(run: Run, events?: TraceEvent[]): RunSummary {
   }
 
   return summary;
+}
+
+/**
+ * Runs recorded before usage kept `cacheReadTokens` still have it per model call in their trace.
+ * Fills it in on each step (and the run total) from those model_call events; recorded values win.
+ */
+export function withCacheReadsFromTrace(run: Run, events: TraceEvent[]): Run {
+  const byStep = new Map<string, number>();
+  for (const event of events) {
+    if (event.type !== "model_call" || !event.stepRunId) continue;
+    const data = event.data;
+    const cached = typeof data === "object" && data !== null && "cacheReadTokens" in data ? data.cacheReadTokens : undefined;
+    if (typeof cached === "number") byStep.set(event.stepRunId, (byStep.get(event.stepRunId) ?? 0) + cached);
+  }
+  if (byStep.size === 0) return run;
+  const steps = run.steps.map((step) =>
+    step.usage && step.usage.cacheReadTokens === undefined && byStep.has(step.id)
+      ? { ...step, usage: { ...step.usage, cacheReadTokens: byStep.get(step.id) } }
+      : step,
+  );
+  const totalUsage =
+    run.totalUsage && run.totalUsage.cacheReadTokens === undefined
+      ? { ...run.totalUsage, cacheReadTokens: steps.reduce((sum, s) => sum + (s.usage?.cacheReadTokens ?? 0), 0) }
+      : run.totalUsage;
+  return { ...run, steps, totalUsage };
 }
 
 export function getStepRun(run: Run, stepRunId: string): StepRun | undefined {

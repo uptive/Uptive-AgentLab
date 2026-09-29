@@ -109,7 +109,7 @@ describe("createClaudeAgentRuntime", () => {
 
     expect(result.status).toBe("completed");
     expect(result.output).toEqual({ ok: true });
-    expect(result.usage).toEqual({ inputTokens: 200, outputTokens: 40, estimatedCostUsd: 0.0123, latencyMs: 1234 });
+    expect(result.usage).toEqual({ inputTokens: 200, cacheReadTokens: 50, outputTokens: 40, estimatedCostUsd: 0.0123, latencyMs: 1234 });
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]).toMatchObject({ toolId: "Read", input: { file_path: "a.ts" }, output: "contents" });
     expect(getAuth()).toBe("subscription");

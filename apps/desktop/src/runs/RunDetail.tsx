@@ -4,7 +4,7 @@ import { getTelemetryStore, summarizeRun } from "@agentlab/observability";
 import { theme } from "../theme.js";
 import { useLiveSteps } from "../liveRuns.js";
 import type { Catalog } from "./catalog.js";
-import { formatMs, formatRelative, formatUsd } from "./format.js";
+import { formatMs, formatRelative, formatTokens, formatUsd } from "./format.js";
 import { RunFeed } from "./RunFeed.js";
 import { buildLiveStatus, buildRunFeed } from "./feedEntries.js";
 import { RunGraph } from "./RunGraph.js";
@@ -136,7 +136,7 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
       <div style={{ display: "flex", gap: 32, margin: "8px 0 16px", flexWrap: "wrap" }}>
         <Metric label="Progress" value={`${completedSteps} / ${Math.max(run.steps.length, flow.nodes.length)} steps`} />
         <Metric label={live ? "Latency (so far)" : "Latency"} value={formatMs(durationMs)} />
-        <Metric label={live ? "Total tokens (so far)" : "Total tokens"} value={totalTokens.toLocaleString()} />
+        <Metric label={live ? "Total tokens (so far)" : "Total tokens"} value={formatTokens(totalTokens, summary.cacheReadTokens)} />
         <Metric label={live ? "Cost of finished steps" : "Estimated cost"} value={formatUsd(summary.estimatedCostUsd)} />
         {live ? (
           <Metric

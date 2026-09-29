@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { AgentDefinition } from "@agentlab/contracts";
 import type { AgentJudgement, AgentTestResult, SchemaCheck } from "../../electron/api.js";
+import { formatTokens } from "../runs/format.js";
 import { sampleFromSchema } from "../sampleFromSchema.js";
 import { alpha, theme } from "../theme.js";
 
@@ -280,7 +281,7 @@ export function AgentTestPanel({ buildAgent, resetKey }: { buildAgent: () => Age
             <Metric name="Time" value={formatMs(result.usage.latencyMs)} />
             <Metric
               name="Tokens in / out"
-              value={`${result.usage.inputTokens} / ${result.usage.outputTokens}`}
+              value={`${formatTokens(result.usage.inputTokens, result.usage.cacheReadTokens)} / ${formatTokens(result.usage.outputTokens)}`}
               over={limits?.maxTokens !== undefined && totalTokens > limits.maxTokens ? `Over the ${limits.maxTokens} token limit` : undefined}
             />
             <Metric
@@ -337,7 +338,7 @@ export function AgentTestPanel({ buildAgent, resetKey }: { buildAgent: () => Age
                   <td style={{ padding: "4px 6px", fontFamily: theme.fontMono }}>{model}</td>
                   <td style={{ padding: "4px 6px" }}>{r.status}</td>
                   <td style={{ padding: "4px 6px" }}>{formatMs(r.usage.latencyMs)}</td>
-                  <td style={{ padding: "4px 6px" }}>{r.usage.inputTokens + r.usage.outputTokens}</td>
+                  <td style={{ padding: "4px 6px" }}>{formatTokens(r.usage.inputTokens + r.usage.outputTokens, r.usage.cacheReadTokens)}</td>
                   <td style={{ padding: "4px 6px" }}>{formatUsd(r.usage.estimatedCostUsd)}</td>
                   <td style={{ padding: "4px 6px" }}>{r.outputCheck.status === "valid" ? "✓" : r.outputCheck.status === "invalid" ? "✗" : "–"}</td>
                   <td style={{ padding: "4px 6px" }}>{score ? `${score}/5` : "–"}</td>

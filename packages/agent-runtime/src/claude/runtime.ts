@@ -219,6 +219,7 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
       let pending: PendingModelCall | undefined;
       let streamedInput = 0;
       let streamedOutput = 0;
+      let streamedCacheRead = 0;
       let lastError: string | undefined;
       let tokenLimitHit = false;
       const flush = () => {
@@ -227,6 +228,7 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
         const inputTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
         streamedInput += inputTokens;
         streamedOutput += u.output_tokens ?? 0;
+        streamedCacheRead += u.cache_read_input_tokens ?? 0;
         emit("model_call", {
           messageId: pending.id,
           model: pending.model,
@@ -286,7 +288,13 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
         }
       } catch (error) {
         flush();
-        const usage = { ...ZERO_USAGE, inputTokens: streamedInput, outputTokens: streamedOutput, latencyMs: Date.now() - startedAt };
+        const usage = {
+          ...ZERO_USAGE,
+          inputTokens: streamedInput,
+          cacheReadTokens: streamedCacheRead,
+          outputTokens: streamedOutput,
+          latencyMs: Date.now() - startedAt,
+        };
         if (tokenLimitHit) return fail(`Stopped: token limit of ${agent.limits?.maxTokens} reached`, usage);
         if (config.signal?.aborted) return fail("Run was cancelled", usage);
         return fail(friendlyError(lastError, error instanceof Error ? error.message : String(error)), usage);
@@ -300,6 +308,7 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
       const modelUsage = Object.values(result.modelUsage ?? {});
       const usage: Usage = {
         inputTokens: modelUsage.reduce((sum, m) => sum + m.inputTokens + m.cacheReadInputTokens + m.cacheCreationInputTokens, 0) || streamedInput,
+        cacheReadTokens: modelUsage.reduce((sum, m) => sum + m.cacheReadInputTokens, 0) || streamedCacheRead,
         outputTokens: modelUsage.reduce((sum, m) => sum + m.outputTokens, 0) || streamedOutput,
         estimatedCostUsd: result.total_cost_usd,
         latencyMs: result.duration_ms,

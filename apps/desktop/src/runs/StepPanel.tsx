@@ -3,7 +3,7 @@ import type { AgentDefinition, StepRun } from "@agentlab/contracts";
 import { theme } from "../theme.js";
 import type { LiveStep } from "../liveRuns.js";
 import { ActivityBlockView } from "./ActivityView.js";
-import { formatMs, formatUsd, stepLatencyMs } from "./format.js";
+import { formatMs, formatTokens, formatUsd, stepLatencyMs } from "./format.js";
 import { ReadableValue } from "./ReadableValue.js";
 import { RunFeed } from "./RunFeed.js";
 import type { FeedEntry, LiveStatus } from "./feedEntries.js";
@@ -134,7 +134,7 @@ export function StepPanel({ step, agent, label, feed, live, status, context, now
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 16 }}>
         <Metric label={running ? "Latency (so far)" : "Latency"} value={formatMs(latencyMs)} size={16} />
         <Metric label="Cost" value={usage ? formatUsd(usage.estimatedCostUsd) : running ? "When finished" : "-"} size={16} />
-        <Metric label={running ? "Input tokens (so far)" : "Input tokens"} value={inputTokens?.toLocaleString() ?? "-"} size={16} />
+        <Metric label={running ? "Input tokens (so far)" : "Input tokens"} value={inputTokens === undefined ? "-" : formatTokens(inputTokens, usage?.cacheReadTokens)} size={16} />
         <Metric label={running ? "Output tokens (so far)" : "Output tokens"} value={outputTokens?.toLocaleString() ?? "-"} size={16} />
       </div>
       {step.startedAt ? (
