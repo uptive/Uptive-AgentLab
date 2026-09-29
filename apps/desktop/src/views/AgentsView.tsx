@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
-import { MODEL_CATALOG, agentEngine, type AgentDefinition, type AgentEngine, type AgentInput, type AgentStatus, type JevQuestion, type ToolRef } from "@agentlab/contracts";
+import { DEFAULT_MODEL_ID, MODEL_CATALOG, agentEngine, type AgentDefinition, type AgentEngine, type AgentInput, type AgentStatus, type JevQuestion, type ToolRef } from "@agentlab/contracts";
 import { BUILTIN_TOOLS, FUNCTION_TOOLS } from "@agentlab/agent-runtime";
 import type { AgentDraft, AgentSource, SourcedAgent } from "../../electron/api.js";
 import { PROMOTION_SUMMARY, promotionConfirmText } from "../agentPromotion.js";
@@ -41,7 +41,7 @@ const EMPTY_FORM: FormState = {
   role: "",
   status: "draft",
   description: "",
-  model: "claude-sonnet-5",
+  model: DEFAULT_MODEL_ID,
   effort: "",
   maxTurns: "",
   systemInstructions: "",
@@ -1001,7 +1001,7 @@ export function AgentsView() {
                     setForm((current) => ({
                       ...current,
                       engine,
-                      model: engine === "jev" ? "jev-latest" : "claude-sonnet-5",
+                      model: engine === "jev" ? "jev-latest" : DEFAULT_MODEL_ID,
                     }));
                   }}
                 >

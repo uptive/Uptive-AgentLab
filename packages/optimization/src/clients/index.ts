@@ -1,7 +1,7 @@
 // Node-only entry (`@agentlab/optimization/models`): picks the model backend for LLM-backed evaluators.
 //   AGENT_BACKEND=cli (default)  local Claude Code CLI, billed to the logged-in Claude.ai subscription
 //   AGENT_BACKEND=api            Anthropic API via the SDK, billed per token (needs ANTHROPIC_API_KEY)
-// Each request can name its model; otherwise AGENT_MODEL, then Sonnet 5.
+// Each request can name its model; otherwise AGENT_MODEL, then Sonnet 5.5.
 import type { ModelClient } from "../types.js";
 import { createAnthropicModelClient } from "./anthropic.js";
 import { createClaudeCliModelClient } from "./claudeCli.js";

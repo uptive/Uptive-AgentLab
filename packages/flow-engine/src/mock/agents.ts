@@ -20,7 +20,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "reviewer",
     description: "Looks for bugs and regression risks.",
     systemInstructions: "Review the code for bugs, readability and regression risks.",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     tools: [],
   },
   {
@@ -29,7 +29,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "reviewer",
     description: "Looks for security vulnerabilities.",
     systemInstructions: "Review the code for security vulnerabilities and unsafe patterns.",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     tools: [],
   },
   {
@@ -56,7 +56,7 @@ export const dummyAgents: AgentDefinition[] = [
     role: "validator",
     description: "Merges all findings and produces a verdict.",
     systemInstructions: "Merge all reviewer findings and produce a final verdict.",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     tools: [],
   },
 ];

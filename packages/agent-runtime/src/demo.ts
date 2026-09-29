@@ -57,7 +57,7 @@ export const demoAgents: AgentDefinition[] = [
     status: "active",
     systemInstructions:
       "You review code changes for bugs, regressions and unclear logic, following the plan you are given. If a repository folder is available, read the surrounding code to confirm a finding before reporting it. Report only real problems, most severe first.",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     tools: [
       { id: "Read", name: "Read", kind: "builtin" },
       { id: "Grep", name: "Grep", kind: "builtin" },
@@ -74,7 +74,7 @@ export const demoAgents: AgentDefinition[] = [
     status: "active",
     systemInstructions:
       "You review code changes for security risks such as injection, leaked secrets, missing authorization and unsafe input handling, following the plan you are given. Report only real risks, most severe first.",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     tools: [
       { id: "Read", name: "Read", kind: "builtin" },
       { id: "Grep", name: "Grep", kind: "builtin" },
@@ -90,7 +90,7 @@ export const demoAgents: AgentDefinition[] = [
     status: "active",
     systemInstructions:
       "You receive a code review and a security review of the same change. Combine them into one verdict: approve if there are no high-severity findings, otherwise request changes. List the reasons.",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     tools: [],
     outputSchema: {
       type: "object",
