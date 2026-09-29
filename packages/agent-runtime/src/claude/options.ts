@@ -1,4 +1,4 @@
-import type { AgentDefinition, AuthSource, McpServerDefinition } from "@agentlab/contracts";
+import type { AuthSource, ClaudeAgentDefinition, McpServerDefinition } from "@agentlab/contracts";
 import type { ApiKeySource, McpServerConfig, Options } from "@anthropic-ai/claude-agent-sdk";
 import { builtinToolName, mcpServerKey } from "../tools.js";
 
@@ -25,7 +25,7 @@ export interface ResolvedTools {
   unknown: string[];
 }
 
-export function resolveTools(agent: AgentDefinition, knownFunctionIds: ReadonlySet<string>): ResolvedTools {
+export function resolveTools(agent: ClaudeAgentDefinition, knownFunctionIds: ReadonlySet<string>): ResolvedTools {
   const builtins = new Set<string>();
   const allowed = new Set<string>();
   const servers = new Set<string>();
@@ -112,7 +112,7 @@ export function supportsAdaptiveThinking(model: string): boolean {
 }
 
 export interface BaseOptionsInput {
-  agent: AgentDefinition;
+  agent: ClaudeAgentDefinition;
   tools: ResolvedTools;
   mcpServers: Record<string, McpServerConfig>;
   cwd: string;

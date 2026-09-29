@@ -3,14 +3,18 @@ import { createRequire } from "node:module";
 import { cp, readdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentDefinition, AgentStreamChunk, AuthSource, FlowDefinition, McpServerDefinition, McpServerInput, Run, SkillDefinition, TraceEvent } from "@agentlab/contracts";
+import { z } from "zod";
+import { agentEngine, type AgentDefinition, type AgentRuntime, type AgentStreamChunk, type AuthSource, type FlowDefinition, type McpServerDefinition, type McpServerInput, type Run, type SkillDefinition, type TraceEvent } from "@agentlab/contracts";
 import { interruptRun, type AsyncTelemetryStore } from "@agentlab/observability";
+import { validateAgentInput } from "@agentlab/agent-runtime";
 import { createClaudeAgentRuntime, getClaudeAuthStatus, testMcpServer, type ClaudeAuthStatus } from "@agentlab/agent-runtime/claude";
+import { createJevAgentRuntime, createJevClient, createRoutingAgentRuntime, type JevClient } from "@agentlab/agent-runtime/jev";
 import { createMcpServerFileStore, createSkillFileStore, parseSkillFile } from "@agentlab/agent-runtime/library";
 import { createFlowEngine } from "@agentlab/flow-engine";
-import { IPC, type AgentTestRequest, type AgentTestResult, type ImportResult, type LibraryMcpServer, type StartRunRequest } from "./api.js";
+import { IPC, type AgentTestRequest, type AgentTestResult, type ImportResult, type JevStatus, type LibraryMcpServer, type StartRunRequest } from "./api.js";
 import { checkSchema } from "./agentTest.js";
 import { outcomeOf, type RunOutcome } from "./notificationState.js";
+import type { Handle } from "./ipcHandle.js";
 import type { SecretStore } from "./secrets.js";
 
 // Runs flows for real with the Claude runtime, and manages the skill and MCP libraries.
@@ -66,6 +70,8 @@ export interface AgentRunsDeps {
   dataDir: string;
   /** Shared with the other main-process users of `<userData>/secrets.json`. */
   secrets: SecretStore;
+  /** Validates renderer origin and payloads for security-sensitive IPC. */
+  handle: Handle;
   /** Every snapshot of a running flow. */
   onRunUpdate?: (run: Run) => void;
   /** Once per run, with its final snapshot. */
@@ -92,8 +98,11 @@ export interface AgentRuns {
 }
 
 const secretRefFor = (serverId: string) => `mcp:${serverId}`;
+const TYPESAFE_SECRET_REF = "typesafe:api-key";
 
 const isOpen = (run: Run) => run.status === "running" || run.status === "pending";
+const usesJev = (agent: AgentDefinition) =>
+  agentEngine(agent) === "jev" || (agent.engine !== "jev" && agent.tools.some((tool) => tool.kind === "function" && tool.id === "typesafe_system_one"));
 
 /**
  * Registers the run and library IPC. The returned `recovered` settles once runs left open by a
@@ -103,11 +112,26 @@ const isOpen = (run: Run) => run.status === "running" || run.status === "pending
 export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
   const skills = createSkillFileStore(process.env.SKILLS_DIR || path.join(deps.dataDir, "skills"));
   const mcpServers = createMcpServerFileStore(process.env.MCP_SERVERS_DIR || path.join(deps.dataDir, "mcp-servers"));
-  const { secrets } = deps;
+  const { handle, secrets } = deps;
   const workspaceRoot = path.join(app.getPath("userData"), "workspaces");
   const pathToClaudeCodeExecutable = claudeBinaryPath();
   const inspectOptions = { pathToClaudeCodeExecutable };
   const active = new Map<string, AbortController>();
+  let jevStatusCache: Promise<JevStatus> | undefined;
+
+  const jevApiKey = async () => (await secrets.get(TYPESAFE_SECRET_REF)) ?? (process.env.TYPESAFE_API_KEY?.trim() || undefined);
+  const optionalJevClient = async (): Promise<JevClient | undefined> => {
+    const apiKey = await jevApiKey();
+    return apiKey ? createJevClient({ apiKey, baseURL: process.env.TYPESAFE_BASE_URL }) : undefined;
+  };
+  const unavailableJevClient: JevClient = {
+    models: async () => {
+      throw new Error("TypeSafe Jev is not configured on this computer");
+    },
+    evaluate: async () => {
+      throw new Error("TypeSafe Jev is not configured on this computer");
+    },
+  };
 
   void pruneWorkspaces(workspaceRoot);
 
@@ -166,7 +190,9 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
     if (missing.length > 0) throw new Error(`Unknown agents in this flow: ${[...new Set(missing)].join(", ")}`);
 
     const controller = new AbortController();
-    let authSource: AuthSource | undefined;
+    const hasClaude = [...agents.values()].some((agent) => agentEngine(agent) === "claude");
+    const hasJev = [...agents.values()].some(usesJev);
+    let authSource: AuthSource | undefined = hasJev ? (hasClaude ? "mixed" : "typesafe-api-key") : undefined;
     const snapshot = {
       flow,
       agents: [...agents.values()],
@@ -188,7 +214,8 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
       void publishRun(run).catch((e) => console.warn("[runs] could not save run:", e.message));
       return run;
     };
-    const runtime = createClaudeAgentRuntime({
+    const jevClient = hasJev ? await optionalJevClient() : undefined;
+    const claudeRuntime = createClaudeAgentRuntime({
       skillsDir: skills.dir,
       workspaceRoot,
       resolveMcpServer: (id) => mcpServers.get(id),
@@ -196,9 +223,16 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
       additionalDirectories: folder ? [folder] : [],
       onEvent: sendEvent,
       onStream: (chunk) => batcher.push(chunk),
-      onAuth: (source) => (authSource ??= source),
+      onAuth: (source) => {
+        if (authSource !== "mixed") authSource = source;
+      },
       signal: controller.signal,
       pathToClaudeCodeExecutable,
+      jevClient,
+    });
+    const runtime = createRoutingAgentRuntime({
+      claude: claudeRuntime,
+      jev: createJevAgentRuntime({ client: jevClient ?? unavailableJevClient, folder, signal: controller.signal, onEvent: sendEvent }),
     });
     const engine = createFlowEngine({ runtime, resolveAgent: (id) => agents.get(id), onEvent: sendEvent });
 
@@ -256,14 +290,17 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
   // Test runs from the agent editor: the same runtime as flow runs, but for an unsaved definition,
   // streamed on their own channel and never saved to telemetry.
   const activeTests = new Map<string, AbortController>();
-  ipcMain.handle(IPC.testAgent, async (_e, { testId, agent, input }: AgentTestRequest): Promise<AgentTestResult> => {
+  ipcMain.handle(IPC.testAgent, async (_e, { testId, agent, input, folder }: AgentTestRequest): Promise<AgentTestResult> => {
+    validateAgentInput(agent);
+    if (folder && !(await stat(folder).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${folder}`);
     const controller = new AbortController();
     activeTests.set(testId, controller);
     const batcher = createStreamBatcher((chunks) => broadcast(IPC.agentTestStream, chunks));
     const inputCheck = checkSchema(agent.inputSchema, input);
     const skipped = { status: "skipped" as const, errors: [] };
     const startedAt = Date.now();
-    const runtime = createClaudeAgentRuntime({
+    const jevClient = usesJev(agent) ? await optionalJevClient() : undefined;
+    const claudeRuntime = createClaudeAgentRuntime({
       skillsDir: skills.dir,
       workspaceRoot,
       resolveMcpServer: (id) => mcpServers.get(id),
@@ -271,6 +308,11 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
       onStream: (chunk) => batcher.push(chunk),
       signal: controller.signal,
       pathToClaudeCodeExecutable,
+      jevClient,
+    });
+    const runtime: AgentRuntime = createRoutingAgentRuntime({
+      claude: claudeRuntime,
+      jev: createJevAgentRuntime({ client: jevClient ?? unavailableJevClient, folder, signal: controller.signal }),
     });
     try {
       const result = await runtime.run(agent, input, { runId: testId, stepRunId: testId });
@@ -314,6 +356,26 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
   ipcMain.handle(IPC.authStatus, async (_e, refresh?: boolean) => {
     if (refresh || !authCache) authCache = getClaudeAuthStatus(inspectOptions);
     return authCache;
+  });
+
+  const readJevStatus = async (): Promise<JevStatus> => {
+    const client = await optionalJevClient();
+    if (!client) return { state: "not-configured" };
+    try {
+      return { state: "ready", models: await client.models() };
+    } catch (error) {
+      return { state: "error", error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  handle(IPC.jevStatus, z.tuple([z.boolean().optional()]), async ([refresh]) => {
+    if (refresh || !jevStatusCache) jevStatusCache = readJevStatus();
+    return jevStatusCache;
+  });
+  handle(IPC.setJevApiKey, z.tuple([z.string().max(4096).nullable()]), async ([apiKey]) => {
+    if (apiKey === null || !apiKey.trim()) await secrets.delete(TYPESAFE_SECRET_REF);
+    else await secrets.set(TYPESAFE_SECRET_REF, apiKey.trim());
+    jevStatusCache = readJevStatus();
+    return jevStatusCache;
   });
 
   // ---- Skills ------------------------------------------------------------------------------

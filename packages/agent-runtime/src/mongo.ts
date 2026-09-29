@@ -1,13 +1,13 @@
 import type { Db } from "mongodb";
 import { DEFAULT_AGENT_ROLES, type AgentDefinition, type AgentRoleStore, type AgentStore } from "@agentlab/contracts";
-import { validateAgentInput } from "./agentStore.js";
+import { normalizeAgent, validateAgentInput } from "./agentStore.js";
 
 // Node-only: import this from the Electron main process, never the renderer.
 
 type AgentDoc = AgentDefinition & { _id: string };
 
 function stripId({ _id, ...rest }: AgentDoc): AgentDefinition {
-  return rest;
+  return normalizeAgent(rest);
 }
 
 export interface MongoAgentStore extends AgentStore {
@@ -32,7 +32,7 @@ export async function createMongoAgentStore(db: Db): Promise<MongoAgentStore> {
       validateAgentInput(input);
       const now = new Date().toISOString();
       const id = crypto.randomUUID();
-      const agent: AgentDefinition = { ...input, tools: input.tools ?? [], id, createdAt: now, updatedAt: now };
+      const agent = normalizeAgent({ ...input, id, createdAt: now, updatedAt: now } as AgentDefinition);
       await agents.insertOne({ _id: id, ...agent });
       return agent;
     },
@@ -42,27 +42,22 @@ export async function createMongoAgentStore(db: Db): Promise<MongoAgentStore> {
         throw new Error(`An agent with id "${existing.id}" already exists in the database`);
       }
       const now = new Date().toISOString();
-      const agent: AgentDefinition = { ...existing, tools: existing.tools ?? [], createdAt: existing.createdAt ?? now, updatedAt: now };
+      const agent = normalizeAgent({ ...existing, createdAt: existing.createdAt ?? now, updatedAt: now });
       await agents.insertOne({ _id: agent.id, ...agent });
       return agent;
     },
     async update(id, patch) {
-      validateAgentInput(patch, true);
+      const existing = await agents.findOne({ _id: id });
+      if (!existing) throw new Error(`Agent ${id} not found`);
       const { id: _id, createdAt: _createdAt, ...fields } = patch as Partial<AgentDefinition>;
-      // Fields explicitly set to undefined are cleared rather than stored as null.
-      const $set: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-      const $unset: Record<string, ""> = {};
-      for (const [key, value] of Object.entries(fields)) {
-        if (value === undefined) $unset[key] = "";
-        else $set[key] = value;
-      }
-      const doc = await agents.findOneAndUpdate(
-        { _id: id },
-        Object.keys($unset).length ? { $set, $unset } : { $set },
-        { returnDocument: "after", ignoreUndefined: true },
+      const agent = normalizeAgent(
+        Object.fromEntries(
+          Object.entries({ ...stripId(existing), ...fields, id, updatedAt: new Date().toISOString() }).filter(([, value]) => value !== undefined),
+        ) as unknown as AgentDefinition,
       );
-      if (!doc) throw new Error(`Agent ${id} not found`);
-      return stripId(doc);
+      validateAgentInput(agent);
+      await agents.replaceOne({ _id: id }, agent);
+      return agent;
     },
     async delete(id) {
       const result = await agents.deleteOne({ _id: id });

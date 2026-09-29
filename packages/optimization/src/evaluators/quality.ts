@@ -120,7 +120,7 @@ function missingOutputSchemas(input: EvaluationInput, alreadyFlagged: Set<string
 function vagueInstructions(input: EvaluationInput): Recommendation[] {
   return input.flow.nodes.flatMap<Recommendation>((node) => {
     const agent = input.agents.find((a) => a.id === node.agentId);
-    if (!agent) return [];
+    if (!agent?.systemInstructions) return [];
     const words = wordCount(agent.systemInstructions);
     if (words >= MIN_INSTRUCTION_WORDS) return [];
     return [
@@ -191,6 +191,6 @@ function wordCount(text: string): number {
 }
 
 function averageInstructionWords(input: EvaluationInput): number {
-  const counts = input.agents.map((a) => wordCount(a.systemInstructions)).filter((n) => n >= MIN_INSTRUCTION_WORDS);
+  const counts = input.agents.flatMap((agent) => (agent.systemInstructions ? [wordCount(agent.systemInstructions)] : [])).filter((n) => n >= MIN_INSTRUCTION_WORDS);
   return counts.length ? Math.round(counts.reduce((a, b) => a + b, 0) / counts.length) : 0;
 }

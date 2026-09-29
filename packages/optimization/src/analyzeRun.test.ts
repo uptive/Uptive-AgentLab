@@ -59,7 +59,7 @@ describe("analyzeRun on the PR-review fixture", () => {
       evaluate: () => Promise.reject(new Error("No Claude API credentials")),
     };
     const { recommendations, skippedEvaluators } = await analyzeRun(codeReviewFixture, [failing, ...defaultEvaluators]);
-    expect(skippedEvaluators).toEqual([{ evaluatorId: "flow-design", category: "flow-design", reason: "No Claude API credentials" }]);
+    expect(skippedEvaluators).toContainEqual({ evaluatorId: "flow-design", category: "flow-design", reason: "No Claude API credentials" });
     expect(recommendations.length).toBeGreaterThan(0);
   });
 

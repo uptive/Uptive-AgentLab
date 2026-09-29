@@ -30,11 +30,12 @@ export interface UsageLimits {
 }
 
 export type AgentStatus = "active" | "draft" | "disabled";
+export type AgentEngine = "claude" | "jev";
 
 /** Roles seeded into an empty role list. Roles are labels shown on flow nodes; behaviour lives in systemInstructions. */
 export const DEFAULT_AGENT_ROLES = ["planner", "researcher", "reviewer", "writer", "validator", "orchestrator"];
 
-export interface AgentDefinition {
+interface AgentDefinitionBase {
   id: string;
   name: string;
   description?: string;
@@ -42,12 +43,7 @@ export interface AgentDefinition {
   role: string;
   /** Lifecycle state shown in the UI; treated as "draft" when unset. */
   status?: AgentStatus;
-  systemInstructions: string;
   model: ModelId;
-  modelSettings?: ModelSettings;
-  tools: ToolRef[];
-  /** Names of skills (see `SkillDefinition`) the agent may load. */
-  skills?: string[];
   inputSchema?: unknown;
   outputSchema?: unknown;
   limits?: UsageLimits;
@@ -55,8 +51,67 @@ export interface AgentDefinition {
   updatedAt?: string;
 }
 
+export interface ClaudeAgentDefinition extends AgentDefinitionBase {
+  /** Missing on legacy records, which are treated as Claude agents. */
+  engine?: "claude";
+  systemInstructions: string;
+  modelSettings?: ModelSettings;
+  tools: ToolRef[];
+  /** Names of skills (see `SkillDefinition`) the agent may load. */
+  skills?: string[];
+}
+
+export interface JevNoulQuestion {
+  id: string;
+  type: "noul";
+  instructions: string;
+  criteria?: { true?: string; false?: string };
+}
+
+export interface JevChoiceQuestion {
+  id: string;
+  type: "choice";
+  instructions: string;
+  criteria: Record<string, string | null>;
+}
+
+export interface JevScoreQuestion {
+  id: string;
+  type: "score";
+  instructions: string;
+  criteria: [string, string, ...string[]];
+}
+
+export type JevQuestion = JevNoulQuestion | JevChoiceQuestion | JevScoreQuestion;
+
+export interface JevAgentDefinition extends AgentDefinitionBase {
+  engine: "jev";
+  questions: JevQuestion[];
+  /**
+   * Glob patterns for repository files whose contents are merged into the evaluated state as
+   * `{ input, files: { "<relative path>": "<contents>" } }`. Read-only: the runtime never writes,
+   * and every pattern is resolved relative to the run folder and may never escape it (absolute
+   * patterns and `..` segments are rejected). A pattern that matches nothing is not an error.
+   */
+  sources?: string[];
+  systemInstructions?: never;
+  modelSettings?: never;
+  tools?: never;
+  skills?: never;
+}
+
+export type AgentDefinition = ClaudeAgentDefinition | JevAgentDefinition;
+
 /** Fields a caller supplies when creating an agent; id and timestamps are assigned by the store. */
-export type AgentInput = Omit<AgentDefinition, "id" | "createdAt" | "updatedAt">;
+export type AgentInput = AgentDefinition extends infer T
+  ? T extends AgentDefinition
+    ? Omit<T, "id" | "createdAt" | "updatedAt">
+    : never
+  : never;
+
+export function agentEngine(agent: Pick<AgentDefinition, "engine">): AgentEngine {
+  return agent.engine ?? "claude";
+}
 
 /** Persistence for agent definitions. Shared seam: other groups look agents up through this. */
 export interface AgentStore {

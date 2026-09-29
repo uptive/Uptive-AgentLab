@@ -7,12 +7,19 @@ import type {
   TraceEvent,
 } from "@agentlab/contracts";
 
+/** What the machine running the analysis can actually do. Anything missing counts as unavailable. */
+export interface EvaluationCapabilities {
+  /** True when a TypeSafe API key is configured, so Jev agents can run here. */
+  jevAvailable?: boolean;
+}
+
 /** Everything an evaluator may look at. Evaluators critique the run; they never re-run the task. */
 export interface EvaluationInput {
   run: Run;
   flow: FlowDefinition;
   agents: AgentDefinition[];
   events?: TraceEvent[];
+  capabilities?: EvaluationCapabilities;
 }
 
 export interface Evaluator {
@@ -22,6 +29,8 @@ export interface Evaluator {
   evaluate(input: EvaluationInput): Promise<Recommendation[]>;
   /** Rule-based evaluator to run instead when this one fails (e.g. the model is unavailable). */
   fallback?: Evaluator;
+  /** Why this run can't be evaluated here (e.g. the tool it recommends isn't installed), or undefined. */
+  skipReason?(input: EvaluationInput): string | undefined;
 }
 
 /** Reported by analyzeRun as each evaluator starts and finishes. */

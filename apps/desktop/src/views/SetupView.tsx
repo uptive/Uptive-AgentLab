@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { LocalTool, ToolOutputStream, ToolRun, ToolRunResult } from "../../electron/api.js";
+import type { JevStatus, LocalTool, ToolOutputStream, ToolRun, ToolRunResult } from "../../electron/api.js";
 import { theme } from "../theme.js";
 
 const titleStyle: CSSProperties = { fontFamily: theme.fontTitle, fontWeight: 600, color: theme.title, margin: 0 };
@@ -104,8 +104,88 @@ export function SetupView() {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {tools?.map((tool) => <ToolCard key={tool.id} tool={tool} onChange={replace} />)}
+        <JevCard />
       </div>
     </div>
+  );
+}
+
+function JevCard() {
+  const [status, setStatus] = useState<JevStatus>();
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = async (refresh = false) => {
+    try {
+      setStatus(await window.agentlab.jev.status(refresh));
+    } catch (error) {
+      setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const save = async (value: string | null) => {
+    setBusy(true);
+    try {
+      setStatus(await window.agentlab.jev.setApiKey(value));
+      setApiKey("");
+    } catch (error) {
+      setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label = status?.state === "ready" ? "Ready" : status?.state === "error" ? "Unavailable" : "Optional · not set up";
+  const background = status?.state === "ready" ? theme.statusActive : status?.state === "error" ? theme.warning : theme.statusDisabledBg;
+  const color = status?.state === "ready" || status?.state === "error" ? theme.onStatus : theme.statusDisabledText;
+
+  return (
+    <section style={{ padding: 16, borderRadius: 12, border: `1px solid ${theme.border}`, background: theme.surface, boxShadow: theme.cardShadow }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ ...titleStyle, fontSize: 16 }}>TypeSafe Jev</h2>
+            <span style={{ padding: "2px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, background, color }}>{label}</span>
+          </div>
+          <p style={{ margin: "6px 0 0", fontSize: 14, color: theme.textSecondary }}>
+            Optional second engine for typed decision steps: structured Choice, Score, and Noul answers instead of written text. Flows without
+            Jev agents run exactly as before, whether or not a key is set. The SDK is built in; AgentLab only needs your TypeSafe API key.
+          </p>
+          {status?.state === "not-configured" ? (
+            <p style={{ margin: "6px 0 0", fontSize: 13, color: theme.textSecondary }}>
+              Nothing is missing: add a key only when you want to build Jev agents.
+            </p>
+          ) : null}
+          {status?.state === "ready" ? <p style={{ margin: "6px 0 0", fontSize: 13 }}>Models: {status.models.join(", ")}</p> : null}
+          {status?.state === "error" ? <p style={{ margin: "6px 0 0", fontSize: 13, color: theme.danger }}>{status.error}</p> : null}
+        </div>
+        <button style={ghostButton} onClick={() => void load(true)} disabled={busy}>Check again</button>
+      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (apiKey.trim()) void save(apiKey.trim());
+        }}
+        style={{ display: "flex", gap: 8, marginTop: 14, paddingTop: 14, borderTop: `1px solid ${theme.border}` }}
+      >
+        <input
+          type="password"
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+          placeholder="TypeSafe API key"
+          aria-label="TypeSafe API key"
+          autoComplete="off"
+          style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: `1px solid ${theme.border}`, background: theme.surface }}
+        />
+        <button type="submit" style={pillButton} disabled={busy || !apiKey.trim()}>Save key</button>
+        {status?.state !== "not-configured" ? <button type="button" style={ghostButton} onClick={() => void save(null)} disabled={busy}>Remove</button> : null}
+      </form>
+      <p style={{ margin: "8px 0 0", fontSize: 12 }}>
+        Stored encrypted by the operating system. Create a key at <a href="https://console.typesafe.ai/keys" target="_blank" rel="noreferrer">console.typesafe.ai</a>.
+      </p>
+    </section>
   );
 }
 

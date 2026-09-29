@@ -10,6 +10,7 @@ export const CATEGORY_LABELS: Record<RecommendationCategory, string> = {
 
 export const CHANGE_LABELS: Record<ChangeType, string> = {
   "set-model": "Model change",
+  "set-engine": "Engine change",
   "remove-input": "Input trimming",
   "replace-input": "Input trimming",
   "add-output-schema": "Output schema",

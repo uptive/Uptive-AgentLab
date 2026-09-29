@@ -129,7 +129,15 @@ export function RunDetail({ run, catalog, backLabel, onBack, onRerun }: Props) {
         Started {formatRelative(run.startedAt)}
         {run.startedBy === "claude-code" ? " from Claude Code" : ""} · {run.id}
         {run.authSource && run.authSource !== "unknown"
-          ? ` · paid by ${run.authSource === "subscription" ? "Claude subscription" : "API key"}`
+          ? ` · paid by ${
+              run.authSource === "subscription"
+                ? "Claude subscription"
+                : run.authSource === "typesafe-api-key"
+                  ? "TypeSafe API key"
+                  : run.authSource === "mixed"
+                    ? "Claude and TypeSafe credentials"
+                    : "API key"
+            }`
           : ""}
       </p>
 

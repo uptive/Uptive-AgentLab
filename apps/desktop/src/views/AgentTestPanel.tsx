@@ -130,6 +130,7 @@ interface HistoryEntry {
 
 export function AgentTestPanel({ buildAgent, resetKey }: { buildAgent: () => AgentDefinition; resetKey: string }) {
   const [inputText, setInputText] = useState("");
+  const [folder, setFolder] = useState<string>();
   const [testId, setTestId] = useState<string>();
   const [live, setLive] = useState("");
   const [liveTokens, setLiveTokens] = useState<{ inputTokens: number; outputTokens: number }>();
@@ -143,6 +144,7 @@ export function AgentTestPanel({ buildAgent, resetKey }: { buildAgent: () => Age
   // A different agent in the drawer starts from a clean panel.
   useEffect(() => {
     setInputText("");
+    setFolder(undefined);
     setTested(undefined);
     setJudgement(undefined);
     setHistory([]);
@@ -201,7 +203,7 @@ export function AgentTestPanel({ buildAgent, resetKey }: { buildAgent: () => Age
     setLiveTokens(undefined);
     setJudgement(undefined);
     try {
-      const result = await window.agentlab.agents.test({ testId: id, agent, input });
+      const result = await window.agentlab.agents.test({ testId: id, agent, input, folder });
       if (currentTest.current !== id) return;
       setTested({ id, agent, input, result });
       setHistory((prev) => [{ id, model: agent.model, result }, ...prev].slice(0, 10));
@@ -253,6 +255,29 @@ export function AgentTestPanel({ buildAgent, resetKey }: { buildAgent: () => Age
         onChange={(e) => setInputText(e.target.value)}
         spellCheck={false}
       />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+        <div style={{ ...label, marginBottom: 0 }}>Run folder</div>
+        <button
+          type="button"
+          onClick={() => void window.agentlab.runs.pickFolder().then((picked) => picked && setFolder(picked))}
+          style={{ ...ghost, padding: "2px 10px", fontSize: 12 }}
+          disabled={running}
+        >
+          Choose folder
+        </button>
+        {folder ? (
+          <>
+            <span style={{ fontSize: 12, fontFamily: theme.fontMono, color: theme.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {folder}
+            </span>
+            <button type="button" onClick={() => setFolder(undefined)} style={{ ...ghost, padding: "2px 10px", fontSize: 12 }} disabled={running}>
+              Clear
+            </button>
+          </>
+        ) : (
+          <span style={{ fontSize: 12, color: theme.textMuted }}>Read-only folder a Jev agent&apos;s source globs resolve against.</span>
+        )}
+      </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "10px 0" }}>
         {running ? (
           <button type="button" style={ghost} onClick={() => testId && void window.agentlab.agents.cancelTest(testId)}>
@@ -306,13 +331,17 @@ export function AgentTestPanel({ buildAgent, resetKey }: { buildAgent: () => Age
               <pre style={{ ...code, maxHeight: 320, overflow: "auto" }}>
                 {typeof result.output === "string" ? result.output : JSON.stringify(result.output, null, 2)}
               </pre>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
-                <button type="button" style={ghost} onClick={() => void judge()} disabled={judging}>
-                  {judging ? "Judging…" : judgement ? "Judge again" : "Judge quality"}
-                </button>
-                <span style={{ fontSize: 12, color: theme.textMuted }}>Claude scores the output against the instructions (one extra model call).</span>
-              </div>
-              {judgement ? <Judgement judgement={judgement} /> : null}
+              {tested.agent.engine !== "jev" ? (
+                <>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+                    <button type="button" style={ghost} onClick={() => void judge()} disabled={judging}>
+                      {judging ? "Judging…" : judgement ? "Judge again" : "Judge quality"}
+                    </button>
+                    <span style={{ fontSize: 12, color: theme.textMuted }}>Claude scores the output against the instructions (one extra model call).</span>
+                  </div>
+                  {judgement ? <Judgement judgement={judgement} /> : null}
+                </>
+              ) : null}
             </>
           ) : null}
         </div>

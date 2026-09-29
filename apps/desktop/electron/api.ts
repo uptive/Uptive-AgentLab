@@ -65,6 +65,8 @@ export interface AgentTestRequest {
   testId: string;
   agent: AgentDefinition;
   input: unknown;
+  /** Run folder a Jev agent's `sources` globs resolve against; read-only. */
+  folder?: string;
 }
 
 /** "no-schema" = nothing to check against, "bad-schema" = the schema itself does not compile. */
@@ -111,6 +113,11 @@ export interface ImportResult {
 }
 
 export type { ClaudeAuthStatus, McpTestResult };
+
+export type JevStatus =
+  | { state: "not-configured" }
+  | { state: "ready"; models: string[] }
+  | { state: "error"; error: string };
 
 /** Where an agent is stored: a JSON file in the git-ignored local folder, or MongoDB. */
 export type AgentSource = "local" | "database";
@@ -365,6 +372,11 @@ export interface AgentLabApi {
   claude: {
     authStatus(refresh?: boolean): Promise<ClaudeAuthStatus>;
   };
+  jev: {
+    status(refresh?: boolean): Promise<JevStatus>;
+    /** Empty or null removes the stored key. The key is never returned to the renderer. */
+    setApiKey(apiKey: string | null): Promise<JevStatus>;
+  };
   skills: {
     list(): Promise<SkillDefinition[]>;
     save(skill: SkillDefinition): Promise<SkillDefinition>;
@@ -436,6 +448,8 @@ export const IPC = {
   runStream: "runs:stream",
   pickFolder: "runs:pick-folder",
   authStatus: "claude:auth-status",
+  jevStatus: "jev:status",
+  setJevApiKey: "jev:set-api-key",
   listSkills: "skills:list",
   saveSkill: "skills:save",
   deleteSkill: "skills:delete",

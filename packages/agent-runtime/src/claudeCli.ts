@@ -1,7 +1,15 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentDefinition, AgentResult, AgentRunContext, AgentRuntime, Usage } from "@agentlab/contracts";
+import {
+  agentEngine,
+  type AgentDefinition,
+  type AgentResult,
+  type AgentRunContext,
+  type AgentRuntime,
+  type ClaudeAgentDefinition,
+  type Usage,
+} from "@agentlab/contracts";
 
 export interface CliExecResult {
   exitCode: number | null;
@@ -42,7 +50,7 @@ interface CliJsonResult {
   };
 }
 
-export function resolveClaudeModel(agent: AgentDefinition, fallbackModel?: string): string {
+export function resolveClaudeModel(agent: ClaudeAgentDefinition, fallbackModel?: string): string {
   if (CLAUDE_MODEL.test(agent.model)) return agent.model;
   if (fallbackModel) return fallbackModel;
   throw new Error(`Agent "${agent.name}" uses model "${agent.model}", which the Claude CLI cannot run`);
@@ -54,7 +62,7 @@ export function resolveClaudeModel(agent: AgentDefinition, fallbackModel?: strin
  * and don't pay for context they don't use. Every value is single-line so it survives cmd.exe
  * on Windows; the prompt goes through stdin and the system prompt through a file.
  */
-export function buildClaudeArgs(agent: AgentDefinition, options: { model: string; systemPromptFile: string }): string[] {
+export function buildClaudeArgs(agent: ClaudeAgentDefinition, options: { model: string; systemPromptFile: string }): string[] {
   const args = [
     "-p",
     "--output-format", "json",
@@ -76,7 +84,7 @@ export function formatPrompt(input: unknown): string {
 }
 
 /** Turns the CLI's JSON result into an AgentResult. */
-export function parseClaudeResult(agent: AgentDefinition, exec: CliExecResult, elapsedMs: number): AgentResult {
+export function parseClaudeResult(agent: ClaudeAgentDefinition, exec: CliExecResult, elapsedMs: number): AgentResult {
   const failed = (error: string, usage: Usage = zeroUsage(elapsedMs)): AgentResult => ({
     agentId: agent.id,
     status: "failed",
@@ -127,17 +135,19 @@ export function createClaudeCliRuntime(options: ClaudeCliRuntimeOptions): AgentR
       const started = Date.now();
       let dir: string | undefined;
       try {
-        const model = resolveClaudeModel(agent, options.fallbackModel);
+        if (agentEngine(agent) !== "claude") throw new Error(`Agent "${agent.id}" is not a Claude agent`);
+        const claudeAgent = agent as ClaudeAgentDefinition;
+        const model = resolveClaudeModel(claudeAgent, options.fallbackModel);
         dir = await mkdtemp(path.join(os.tmpdir(), "agentlab-"));
         const systemPromptFile = path.join(dir, "system-prompt.md");
-        await writeFile(systemPromptFile, agent.systemInstructions, "utf8");
+        await writeFile(systemPromptFile, claudeAgent.systemInstructions, "utf8");
 
-        const result = await options.exec(buildClaudeArgs(agent, { model, systemPromptFile }), {
+        const result = await options.exec(buildClaudeArgs(claudeAgent, { model, systemPromptFile }), {
           input: formatPrompt(input),
           cwd: options.cwd ?? os.tmpdir(),
           timeoutMs: options.timeoutMs,
         });
-        return parseClaudeResult(agent, result, Date.now() - started);
+        return parseClaudeResult(claudeAgent, result, Date.now() - started);
       } catch (error) {
         return {
           agentId: agent.id,

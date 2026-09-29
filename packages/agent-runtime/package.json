@@ -10,6 +10,7 @@
     "./mongo": "./src/mongo.ts",
     "./files": "./src/fileAgentStore.ts",
     "./claude": "./src/claude/index.ts",
+    "./jev": "./src/jev/index.ts",
     "./library": "./src/library.ts",
     "./claude-cli": "./src/claudeCli.ts"
   },
@@ -23,13 +24,14 @@
   "dependencies": {
     "@agentlab/contracts": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "^0.3.281",
+    "@typesafe-ai/sdk": "^0.6.0",
     "mongodb": "^6.21.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@agentlab/flow-engine": "workspace:*",
     "@types/node": "^20.19.43",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.9",
-    "@agentlab/flow-engine": "workspace:*"
+    "vitest": "^2.1.9"
   }
 }

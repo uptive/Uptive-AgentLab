@@ -31,6 +31,11 @@ export interface FunctionToolInfo {
 /** In-process tools implemented by the app (see claude/functionTools.ts). */
 export const FUNCTION_TOOLS: FunctionToolInfo[] = [
   { id: "current_time", label: "Current time", description: "Returns the current date and time." },
+  {
+    id: "typesafe_system_one",
+    label: "Jev decision",
+    description: "Ask TypeSafe Jev typed Choice, Score, or Noul questions about structured state.",
+  },
 ];
 
 // Tool ids used by older agent files and demo agents before tool kinds were split up.

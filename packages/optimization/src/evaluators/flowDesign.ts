@@ -121,7 +121,7 @@ function unclearResponsibilities(input: EvaluationInput): Recommendation[] {
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
       const [agentA, agentB] = [agentOf(input, nodes[i]), agentOf(input, nodes[j])];
-      if (!agentA || !agentB || agentA.id === agentB.id) continue;
+      if (!agentA?.systemInstructions || !agentB?.systemInstructions || agentA.id === agentB.id) continue;
       const overlap = responsibilityOverlap(agentA, agentB);
       if (overlap < RESPONSIBILITY_OVERLAP_THRESHOLD) continue;
 
@@ -190,7 +190,7 @@ function missingValidation(input: EvaluationInput): Recommendation[] {
  * (e.g. "reviewer"); what an agent actually does is in its instructions, so compare those.
  */
 function responsibilityOverlap(a: AgentDefinition | undefined, b: AgentDefinition | undefined): number {
-  return a && b ? wordOverlap(a.systemInstructions, b.systemInstructions) : 0;
+  return a?.systemInstructions && b?.systemInstructions ? wordOverlap(a.systemInstructions, b.systemInstructions) : 0;
 }
 
 function schemaFields(agent: AgentDefinition | undefined): Record<string, string> | undefined {

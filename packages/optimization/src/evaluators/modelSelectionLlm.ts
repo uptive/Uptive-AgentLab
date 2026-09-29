@@ -57,7 +57,7 @@ export function buildModelSelectionFacts(input: EvaluationInput) {
   return {
     task: runTask(input),
     availableModels: MODEL_CATALOG.map(({ id, label, tier, inputUsdPerMTok, outputUsdPerMTok }) => ({ id, label, tier, inputUsdPerMTok, outputUsdPerMTok })),
-    steps: input.run.steps.map((step) => {
+    steps: input.run.steps.filter((step) => agentFor(input, step)?.engine !== "jev").map((step) => {
       const agent = agentFor(input, step);
       const modelCalls = input.events?.filter((e) => e.type === "model_call" && e.stepRunId === step.id).map((e) => e.data) ?? [];
       return {
@@ -94,6 +94,10 @@ export function createModelSelectionLlmEvaluator(client: ModelClient): Evaluator
       for (const finding of response.findings ?? []) {
         const step = input.run.steps.find((s) => s.nodeId === finding.nodeId);
         const agent = step && agentFor(input, step);
+        if (agent?.engine === "jev") {
+          console.warn(`[model-selection] dropped finding for Jev step "${finding.nodeId}": Claude model changes do not apply`);
+          continue;
+        }
         const current = agent && getModel(agent.model);
         const alternative = getModel(finding.recommendedModel);
         if (!step?.usage || !agent || !current || !alternative || alternative.id === current.id) {
