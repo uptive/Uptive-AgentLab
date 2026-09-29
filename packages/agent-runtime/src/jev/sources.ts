@@ -1,19 +1,14 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { validateSourcePattern } from "./validation.js";
+
+export { validateSourcePattern } from "./validation.js";
 
 export const MAX_SOURCE_FILES = 50;
 export const MAX_SOURCE_FILE_BYTES = 256 * 1024;
 export const MAX_SOURCE_TOTAL_BYTES = 1024 * 1024;
 
 const SKIPPED_DIRECTORIES = new Set([".git", "node_modules"]);
-
-/** Throws when a pattern could reach outside the run folder. */
-export function validateSourcePattern(pattern: string): void {
-  if (typeof pattern !== "string" || pattern.trim() === "") throw new Error("Jev source pattern must not be empty");
-  if (path.isAbsolute(pattern) || /^[A-Za-z]:[\\/]/.test(pattern)) throw new Error(`Jev source pattern "${pattern}" must be relative to the run folder`);
-  const segments = pattern.replace(/\\/g, "/").split("/");
-  if (segments.includes("..")) throw new Error(`Jev source pattern "${pattern}" must not contain ".."`);
-}
 
 function segmentRegex(segment: string): string {
   let out = "";
