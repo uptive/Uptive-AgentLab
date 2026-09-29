@@ -112,6 +112,7 @@ function overpoweredModels(input: EvaluationInput): Recommendation[] {
 
   for (const step of input.run.steps) {
     const agent = agentFor(input, step);
+    if (agent?.engine === "jev") continue;
     const model = agent && getModel(agent.model);
     const alternative = cheapestModelInTier("fast");
     if (!agent || !model || !alternative || !step.usage || model.tier !== "strong") continue;
@@ -143,6 +144,7 @@ function underpoweredModels(input: EvaluationInput): Recommendation[] {
 
   for (const step of input.run.steps) {
     const agent = agentFor(input, step);
+    if (agent?.engine === "jev") continue;
     const model = agent && getModel(agent.model);
     const alternative = cheapestModelInTier("balanced");
     if (!agent || !model || !alternative || !step.usage || model.tier !== "fast") continue;

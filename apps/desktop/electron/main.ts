@@ -195,6 +195,7 @@ const slugify = (s: string) =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "flow";
 
 function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry, secrets: SecretStore, notifier: RunNotifier) {
+  const handle = createHandle(isAppUrl);
   /** Renderer may only touch files the user registered via the project view. */
   const assertRegistered = async (filePath: string) => {
     if (!(await store.isRegistered(filePath))) throw new Error(`Flow file is not registered in the project: ${filePath}`);
@@ -370,6 +371,7 @@ function registerIpc(store: EditorConfigStore, tools: LocalToolRegistry, secrets
   const runs = registerAgentRunIpc({
     telemetry,
     secrets,
+    handle,
     onRunUpdate: (run) => notifier.runUpdated(run),
     onRunFinished: (run, outcome) => notifier.runFinished(run, outcome),
     // Same lookup as the agent IPC: the local folder first, then MongoDB.

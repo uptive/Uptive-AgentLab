@@ -57,6 +57,31 @@ describe("planChanges", () => {
     expect(plan.skipped[0]).toMatchObject({ recommendationId: "other", reason: "another selected change edits the same field" });
   });
 
+  it("does not apply Claude model changes to Jev agents", async () => {
+    const rec = await recommendations();
+    const modelChange = rec("model-selection:overpowered:plan");
+    const input: EvaluationInput = {
+      ...codeReviewFixture,
+      agents: codeReviewFixture.agents.map((agent) =>
+        agent.id === "planner"
+          ? {
+              id: agent.id,
+              engine: "jev",
+              name: agent.name,
+              role: agent.role,
+              model: "jev-latest",
+              questions: [{ id: "route", type: "noul", instructions: "Should this receive a detailed review?" }],
+            }
+          : agent,
+      ),
+    };
+
+    expect(notTestableReason(input, modelChange)).toBe("Claude model changes do not apply to Jev agents");
+    expect(planChanges(input, [modelChange]).skipped).toEqual([
+      { recommendationId: modelChange.id, reason: "Claude model changes do not apply to Jev agents" },
+    ]);
+  });
+
   it("pins the implicit input of a step before changing what it runs after", () => {
     const flow = {
       ...codeReviewFixture.flow,

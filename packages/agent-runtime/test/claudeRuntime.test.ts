@@ -94,6 +94,18 @@ describe("resolveTools", () => {
     const tools = resolveTools({ ...agent, tools: [{ id: "teleport", name: "Teleport", kind: "function" }] }, new Set());
     expect(tools.unknown).toEqual(["Teleport"]);
   });
+
+  it("only exposes the Jev function tool when the agent selects it", () => {
+    expect(resolveTools({ ...agent, tools: [] }, new Set(["typesafe_system_one"])).allowedTools).not.toContain(
+      "mcp__agentlab__typesafe_system_one",
+    );
+    expect(
+      resolveTools(
+        { ...agent, tools: [{ id: "typesafe_system_one", name: "TypeSafe System One", kind: "function" }] },
+        new Set(["typesafe_system_one"]),
+      ).allowedTools,
+    ).toContain("mcp__agentlab__typesafe_system_one");
+  });
 });
 
 describe("createClaudeAgentRuntime", () => {

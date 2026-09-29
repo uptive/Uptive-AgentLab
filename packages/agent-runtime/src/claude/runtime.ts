@@ -22,8 +22,11 @@ import type {
   TraceEvent,
   TraceEventType,
   Usage,
+  ClaudeAgentDefinition,
 } from "@agentlab/contracts";
+import { agentEngine } from "@agentlab/contracts";
 import { createFunctionToolServer, FUNCTION_TOOL_IDS } from "./functionTools.js";
+import type { JevClient } from "../jev/runtime.js";
 import {
   authSourceOf,
   buildBaseOptions,
@@ -59,6 +62,8 @@ export interface ClaudeRuntimeConfig {
   env?: Record<string, string | undefined>;
   pathToClaudeCodeExecutable?: string;
   defaultMaxTurns?: number;
+  /** Enables the opt-in TypeSafe Jev function tool for Claude agents. */
+  jevClient?: JevClient;
   /** Injectable for tests. */
   query?: typeof sdkQuery;
   now?: () => Date;
@@ -121,6 +126,8 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
 
   return {
     async run(agent: AgentDefinition, input: unknown, context: AgentRunContext): Promise<AgentResult> {
+      if (agentEngine(agent) !== "claude") throw new Error(`Agent "${agent.id}" is not a Claude agent`);
+      const claudeAgent = agent as ClaudeAgentDefinition;
       const stream = (chunk: DistributiveOmit<AgentStreamChunk, "runId" | "stepRunId">) =>
         config.onStream?.({ ...chunk, runId: context.runId, stepRunId: context.stepRunId } as AgentStreamChunk);
       const emit = (type: TraceEventType, data: unknown) =>
@@ -133,13 +140,13 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
         return { agentId: agent.id, status: "failed", output: undefined, error, usage, toolCalls };
       };
 
-      const tools = resolveTools(agent, FUNCTION_TOOL_IDS);
+      const tools = resolveTools(claudeAgent, FUNCTION_TOOL_IDS);
       emit("agent_start", {
         agentId: agent.id,
         agentName: agent.name,
         model: agent.model,
         tools: tools.allowedTools,
-        skills: agent.skills ?? [],
+        skills: claudeAgent.skills ?? [],
         input: bounded(input),
       });
       if (tools.unknown.length > 0) {
@@ -155,11 +162,26 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
         if (server.secretRef && !secret) return fail(`MCP server "${server.name}" needs a secret that is not set on this computer.`);
         mcpServers[mcpServerKey(id)] = toMcpConfig(server, secret);
       }
-      if (tools.functionToolIds.length > 0) mcpServers[FUNCTION_SERVER] = createFunctionToolServer(tools.functionToolIds);
+      if (tools.functionToolIds.length > 0) {
+        mcpServers[FUNCTION_SERVER] = createFunctionToolServer(tools.functionToolIds, {
+          jevClient: config.jevClient,
+          signal: config.signal,
+          onJevCall: (response) =>
+            emit("model_call", {
+              provider: "typesafe",
+              model: response.model,
+              inputTokens: response.usage.inputTokens,
+              outputTokens: response.usage.outputTokens,
+              costUsd: response.usage.estimatedCostUsd,
+              nestedTool: "typesafe_system_one",
+              answers: response.answers,
+            }),
+        });
+      }
 
       if (config.signal?.aborted) return fail("Run was cancelled");
       const cwd = path.join(config.workspaceRoot, context.runId, context.stepRunId);
-      const workspace = await prepareWorkspace(cwd, config.skillsDir, agent.skills ?? []);
+      const workspace = await prepareWorkspace(cwd, config.skillsDir, claudeAgent.skills ?? []);
       if (workspace.missing.length > 0) return fail(`Skills not found: ${workspace.missing.join(", ")}.`);
 
       const abortController = new AbortController();
@@ -196,7 +218,7 @@ export function createClaudeAgentRuntime(config: ClaudeRuntimeConfig): AgentRunt
 
       const options = {
         ...buildBaseOptions({
-          agent,
+          agent: claudeAgent,
           tools,
           mcpServers,
           cwd,

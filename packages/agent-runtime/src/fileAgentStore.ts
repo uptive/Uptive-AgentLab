@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentDefinition, AgentStore } from "@agentlab/contracts";
-import { validateAgentInput } from "./agentStore.js";
+import { normalizeAgent, validateAgentInput } from "./agentStore.js";
 
 // Node-only: import this from the Electron main process, never the renderer.
 
@@ -42,7 +42,7 @@ export function createFileAgentStore(dir: string): FileAgentStore {
         const file = path.join(dir, name);
         try {
           const parsed = JSON.parse(await fs.readFile(file, "utf8")) as Partial<AgentDefinition>;
-          const agent = { ...parsed, id: parsed.id || path.basename(name, ".json"), tools: parsed.tools ?? [] } as AgentDefinition;
+          const agent = normalizeAgent({ ...parsed, id: parsed.id || path.basename(name, ".json") } as AgentDefinition);
           validateAgentInput(agent);
           if (agents.has(agent.id)) throw new Error(`id "${agent.id}" is already used by ${agents.get(agent.id)!.file}`);
           agents.set(agent.id, { agent, file });
@@ -62,19 +62,21 @@ export function createFileAgentStore(dir: string): FileAgentStore {
       validateAgentInput(input);
       const now = new Date().toISOString();
       const id = crypto.randomUUID();
-      const agent: AgentDefinition = { ...input, tools: input.tools ?? [], id, createdAt: now, updatedAt: now };
+      const agent = normalizeAgent({ ...input, id, createdAt: now, updatedAt: now } as AgentDefinition);
       const file = fileFor(id);
       await write(file, agent);
       agents.set(id, { agent, file });
       return agent;
     },
     async update(id, patch) {
-      validateAgentInput(patch, true);
       const entry = find(id);
       const { id: _id, createdAt: _createdAt, ...fields } = patch as Partial<AgentDefinition>;
       const merged: Record<string, unknown> = { ...entry.agent, ...fields, updatedAt: new Date().toISOString() };
       // Fields explicitly set to undefined are cleared.
-      const agent = Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined)) as unknown as AgentDefinition;
+      const agent = normalizeAgent(
+        Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined)) as unknown as AgentDefinition,
+      );
+      validateAgentInput(agent);
       await write(entry.file, agent);
       entry.agent = agent;
       return agent;

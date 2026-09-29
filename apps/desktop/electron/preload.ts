@@ -107,6 +107,10 @@ const api: AgentLabApi = {
   claude: {
     authStatus: (refresh) => ipcRenderer.invoke(IPC.authStatus, refresh),
   },
+  jev: {
+    status: (refresh) => ipcRenderer.invoke(IPC.jevStatus, refresh),
+    setApiKey: (apiKey) => ipcRenderer.invoke(IPC.setJevApiKey, apiKey),
+  },
   skills: {
     list: () => ipcRenderer.invoke(IPC.listSkills),
     save: (skill) => ipcRenderer.invoke(IPC.saveSkill, skill),

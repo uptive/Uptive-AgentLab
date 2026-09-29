@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
-import { MODEL_CATALOG, type AgentDefinition, type AgentInput, type AgentStatus, type ToolRef } from "@agentlab/contracts";
+import { MODEL_CATALOG, agentEngine, type AgentDefinition, type AgentEngine, type AgentInput, type AgentStatus, type JevQuestion, type ToolRef } from "@agentlab/contracts";
 import { BUILTIN_TOOLS, FUNCTION_TOOLS } from "@agentlab/agent-runtime";
 import type { AgentDraft, AgentSource, SourcedAgent } from "../../electron/api.js";
 import { PROMOTION_SUMMARY, promotionConfirmText } from "../agentPromotion.js";
@@ -7,6 +7,7 @@ import { alpha, theme } from "../theme.js";
 import { SkillPicker, ToolPicker } from "../library/ToolPicker.js";
 import { useLibrary } from "../library/useLibrary.js";
 import { AgentTestPanel } from "./AgentTestPanel.js";
+import { JevQuestionEditor } from "./JevQuestionEditor.js";
 
 const MODELS = MODEL_CATALOG.map((m) => m.id);
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -15,6 +16,7 @@ const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const openLibrary = () => window.dispatchEvent(new CustomEvent("agentlab:navigate", { detail: "library" }));
 
 interface FormState {
+  engine: AgentEngine;
   name: string;
   role: string;
   status: AgentStatus;
@@ -23,6 +25,7 @@ interface FormState {
   effort: string;
   maxTurns: string;
   systemInstructions: string;
+  questions: JevQuestion[];
   tools: ToolRef[];
   skills: string[];
   inputSchema: string;
@@ -32,6 +35,7 @@ interface FormState {
 }
 
 const EMPTY_FORM: FormState = {
+  engine: "claude",
   name: "",
   role: "",
   status: "draft",
@@ -40,6 +44,7 @@ const EMPTY_FORM: FormState = {
   effort: "",
   maxTurns: "",
   systemInstructions: "",
+  questions: [{ id: "decision", type: "noul", instructions: "Is this statement true?" }],
   tools: [],
   skills: [],
   inputSchema: "",
@@ -52,6 +57,7 @@ const stringifySchema = (schema: unknown) => (schema === undefined ? "" : JSON.s
 
 function toForm(agent: AgentDefinition): FormState {
   return {
+    engine: agentEngine(agent),
     name: agent.name,
     role: agent.role,
     status: agent.status ?? "draft",
@@ -59,8 +65,9 @@ function toForm(agent: AgentDefinition): FormState {
     model: agent.model,
     effort: typeof agent.modelSettings?.effort === "string" ? agent.modelSettings.effort : "",
     maxTurns: agent.modelSettings?.maxTurns?.toString() ?? "",
-    systemInstructions: agent.systemInstructions,
-    tools: agent.tools,
+    systemInstructions: agent.systemInstructions ?? "",
+    questions: agent.engine === "jev" ? agent.questions : EMPTY_FORM.questions,
+    tools: agent.tools ?? [],
     skills: agent.skills ?? [],
     inputSchema: stringifySchema(agent.inputSchema),
     outputSchema: stringifySchema(agent.outputSchema),
@@ -81,14 +88,24 @@ function parseSchema(label: string, text: string): unknown {
 }
 
 function toInput(form: FormState, existing?: AgentDefinition): AgentInput {
-  return {
+  const common = {
     name: form.name.trim(),
     role: form.role.trim(),
     status: form.status,
     description: form.description.trim() || undefined,
     model: form.model.trim(),
+    inputSchema: parseSchema("Input schema", form.inputSchema),
+    outputSchema: parseSchema("Output schema", form.outputSchema),
+    limits: { maxTokens: toNumber(form.limitMaxTokens), maxCostUsd: toNumber(form.limitMaxCostUsd) },
+  };
+  if (form.engine === "jev") {
+    return { ...common, engine: "jev", questions: form.questions };
+  }
+  return {
+    ...common,
+    engine: "claude",
     modelSettings: {
-      ...existing?.modelSettings,
+      ...(existing?.engine !== "jev" ? existing?.modelSettings : undefined),
       // Current Claude models reject sampling settings; effort and turns are what the runtime uses.
       temperature: undefined,
       maxTokens: undefined,
@@ -98,9 +115,6 @@ function toInput(form: FormState, existing?: AgentDefinition): AgentInput {
     systemInstructions: form.systemInstructions,
     tools: form.tools,
     skills: form.skills,
-    inputSchema: parseSchema("Input schema", form.inputSchema),
-    outputSchema: parseSchema("Output schema", form.outputSchema),
-    limits: { maxTokens: toNumber(form.limitMaxTokens), maxCostUsd: toNumber(form.limitMaxCostUsd) },
   };
 }
 
@@ -797,7 +811,8 @@ export function AgentsView() {
       ? "Save or discard your changes first."
       : undefined;
 
-  const modelOptions = MODELS.includes(form.model) || !form.model ? MODELS : [form.model, ...MODELS];
+  const engineModels = form.engine === "jev" ? ["jev-latest", "jev-preview", "jev-1.13.0"] : MODELS;
+  const modelOptions = engineModels.includes(form.model) || !form.model ? engineModels : [form.model, ...engineModels];
 
   return (
     <div
@@ -973,14 +988,40 @@ export function AgentsView() {
                   ))}
                 </datalist>
               </Field>
-              <Field label="System instructions *">
-                <textarea
-                  style={{ ...codeInput, minHeight: 160 }}
-                  value={form.systemInstructions}
-                  onChange={set("systemInstructions")}
-                  required
-                />
+              <Field label="Execution engine *">
+                <select
+                  style={fieldInput}
+                  value={form.engine}
+                  onChange={(event) => {
+                    const engine = event.target.value as AgentEngine;
+                    setForm((current) => ({
+                      ...current,
+                      engine,
+                      model: engine === "jev" ? "jev-latest" : "claude-sonnet-5",
+                    }));
+                  }}
+                >
+                  <option value="claude">Claude agent</option>
+                  <option value="jev">TypeSafe Jev decision agent</option>
+                </select>
               </Field>
+              {form.engine === "claude" ? (
+                <Field label="System instructions *">
+                  <textarea
+                    style={{ ...codeInput, minHeight: 160 }}
+                    value={form.systemInstructions}
+                    onChange={set("systemInstructions")}
+                    required
+                  />
+                </Field>
+              ) : (
+                <Field label="Typed questions *">
+                  <JevQuestionEditor
+                    questions={form.questions}
+                    onChange={(questions) => setForm((current) => ({ ...current, questions }))}
+                  />
+                </Field>
+              )}
               <Field label="Model *">
                 <select style={{ ...fieldInput, fontFamily: theme.fontMono, fontSize: 13 }} value={form.model} onChange={set("model")} required>
                   {modelOptions.map((model) => (
@@ -991,7 +1032,7 @@ export function AgentsView() {
                 </select>
               </Field>
 
-              <Section title="Model settings">
+              {form.engine === "claude" ? <Section title="Model settings">
                 <div style={twoColumns}>
                   <label
                     style={{ display: "block", padding: "10px 12px", border: `1px solid ${theme.border}`, borderRadius: 8, background: theme.codeBg }}
@@ -1009,25 +1050,25 @@ export function AgentsView() {
                   </label>
                   <StatInput label="Max turns (model calls)" min={1} step={1} value={form.maxTurns} onChange={set("maxTurns")} />
                 </div>
-              </Section>
+              </Section> : null}
 
-              <Section title="Tools">
+              {form.engine === "claude" ? <Section title="Tools">
                 <ToolPicker
                   tools={form.tools}
                   servers={library.servers}
                   onChange={(tools) => setForm((prev) => ({ ...prev, tools }))}
                   onOpenLibrary={openLibrary}
                 />
-              </Section>
+              </Section> : null}
 
-              <Section title="Skills">
+              {form.engine === "claude" ? <Section title="Skills">
                 <SkillPicker
                   selected={form.skills}
                   skills={library.skills}
                   onChange={(skills) => setForm((prev) => ({ ...prev, skills }))}
                   onOpenLibrary={openLibrary}
                 />
-              </Section>
+              </Section> : null}
 
               <Section title="Input / output schema">
                 <div style={twoColumns}>

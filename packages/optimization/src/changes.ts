@@ -55,6 +55,8 @@ export function notTestableReason(input: EvaluationInput, r: Recommendation): st
   const agent = input.agents.find((a) => a.id === agentId);
   switch (change.type) {
     case "set-model":
+      if (agent?.engine === "jev") return "Claude model changes do not apply to Jev agents";
+      return agent ? undefined : "the agent isn't part of this run";
     case "edit-role":
       return agent ? undefined : "the agent isn't part of this run";
     case "add-output-schema": {
@@ -64,6 +66,7 @@ export function notTestableReason(input: EvaluationInput, r: Recommendation): st
     }
     case "edit-instructions":
       if (!agent) return "the agent isn't part of this run";
+      if (agent.engine === "jev") return "Jev agents use typed questions instead of system instructions";
       return hasPlaceholder(change.after) ? "the suggested instructions contain placeholders to fill in" : undefined;
     case "remove-input":
     case "set-dependencies":

@@ -148,6 +148,7 @@ export function toQualityRecommendation(input: EvaluationInput, finding: Quality
     }
     case "edit-instructions":
       if (!finding.proposal.trim()) return "empty instructions";
+      if (agent?.engine === "jev") return "Jev agents use typed questions instead of system instructions";
       change = { type: "edit-instructions", path: "systemInstructions", before: agent?.systemInstructions ?? null, after: finding.proposal.trim() };
       break;
     case "edit-input-mapping": {
@@ -229,4 +230,3 @@ export function createQualityLlmEvaluator(client: ModelClient): Evaluator {
     },
   };
 }
-

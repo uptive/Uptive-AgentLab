@@ -56,7 +56,7 @@ export interface RunTrial {
   recommendationIds: string[];
 }
 
-export type AuthSource = "subscription" | "api-key" | "unknown";
+export type AuthSource = "subscription" | "api-key" | "typesafe-api-key" | "mixed" | "unknown";
 
 export type RunTrigger = "app" | "claude-code";
 

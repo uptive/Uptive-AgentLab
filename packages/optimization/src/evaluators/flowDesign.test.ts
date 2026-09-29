@@ -49,7 +49,9 @@ describe("Flow Design evaluator", () => {
   it("flags agents whose instructions overlap", async () => {
     const codeReviewer = codeReviewFixture.agents.find((a) => a.id === "code-reviewer")!;
     const agents = codeReviewFixture.agents.map((a) =>
-      a.id === "security-reviewer" ? { ...a, systemInstructions: `${codeReviewer.systemInstructions} Also check security.` } : a,
+      a.id === "security-reviewer" && a.engine !== "jev"
+        ? { ...a, systemInstructions: `${codeReviewer.systemInstructions} Also check security.` }
+        : a,
     );
     const recs = await flowDesignEvaluator.evaluate({ ...codeReviewFixture, agents });
     expect(recs.map((r) => r.id)).toContain("flow-design:unclear-responsibilities:code-review:security-review");

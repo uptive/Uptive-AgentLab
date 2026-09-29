@@ -1,3 +1,4 @@
+import type { AgentDefinition } from "@agentlab/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { analyzeRun, createEvaluators } from "../analyzeRun.js";
 import { codeReviewFixture } from "../fixtures/codeReviewRun.js";
@@ -32,7 +33,36 @@ const qualityFinding = (overrides: Record<string, unknown>) => ({
   ...overrides,
 });
 
+const jevPlanner: AgentDefinition = {
+  id: "planner",
+  engine: "jev",
+  name: "Planner",
+  role: "planner",
+  model: "jev-latest",
+  questions: [{ id: "route", type: "noul", instructions: "Should this change receive a detailed review?" }],
+};
+
+const withJevPlanner = {
+  ...codeReviewFixture,
+  agents: codeReviewFixture.agents.map((agent) => (agent.id === "planner" ? jevPlanner : agent)),
+};
+
 describe("LLM-backed Model Selection", () => {
+  it("excludes Jev steps from Claude model recommendations", async () => {
+    expect(buildModelSelectionFacts(withJevPlanner).steps.some((step) => step.nodeId === "plan")).toBe(false);
+    const client = mockClient([
+      {
+        nodeId: "plan",
+        recommendedModel: "claude-haiku-4-5",
+        problem: "Wrong provider.",
+        suggestion: "Replace Jev.",
+        severity: "high",
+        evidence: [],
+      },
+    ]);
+    await expect(createModelSelectionLlmEvaluator(client).evaluate(withJevPlanner)).resolves.toEqual([]);
+  });
+
   it("sends each step's model, usage and retries, and prices the suggested model in code", async () => {
     const facts = buildModelSelectionFacts(codeReviewFixture);
     expect(facts.steps.find((s) => s.nodeId === "security-review")).toMatchObject({ attempts: 2, agent: { model: "claude-haiku-4-5" } });
@@ -64,6 +94,16 @@ describe("LLM-backed Model Selection", () => {
 });
 
 describe("LLM-backed Quality", () => {
+  it("does not turn instruction findings into edits for Jev agents", async () => {
+    const client = mockClient([qualityFinding({ targetNodeId: "plan" })]);
+    const recommendations = await createQualityLlmEvaluator(client).evaluate(withJevPlanner);
+    expect(
+      recommendations.some(
+        (recommendation) => recommendation.target.kind !== "flow" && recommendation.target.agentId === "planner" && recommendation.change.type === "edit-instructions",
+      ),
+    ).toBe(false);
+  });
+
   it("sends every handoff with the value actually passed, and flags missing ones", () => {
     const handoff = buildQualityFacts(codeReviewFixture).handoffs.find((h) => h.field === "securityFindings")!;
     expect(handoff).toMatchObject({ consumerNodeId: "validate", producerNodeId: "security-review", missing: true, valuePassedToConsumer: null });

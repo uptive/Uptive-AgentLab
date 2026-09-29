@@ -306,13 +306,17 @@ export function AgentTestPanel({ buildAgent, resetKey }: { buildAgent: () => Age
               <pre style={{ ...code, maxHeight: 320, overflow: "auto" }}>
                 {typeof result.output === "string" ? result.output : JSON.stringify(result.output, null, 2)}
               </pre>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
-                <button type="button" style={ghost} onClick={() => void judge()} disabled={judging}>
-                  {judging ? "Judging…" : judgement ? "Judge again" : "Judge quality"}
-                </button>
-                <span style={{ fontSize: 12, color: theme.textMuted }}>Claude scores the output against the instructions (one extra model call).</span>
-              </div>
-              {judgement ? <Judgement judgement={judgement} /> : null}
+              {tested.agent.engine !== "jev" ? (
+                <>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+                    <button type="button" style={ghost} onClick={() => void judge()} disabled={judging}>
+                      {judging ? "Judging…" : judgement ? "Judge again" : "Judge quality"}
+                    </button>
+                    <span style={{ fontSize: 12, color: theme.textMuted }}>Claude scores the output against the instructions (one extra model call).</span>
+                  </div>
+                  {judgement ? <Judgement judgement={judgement} /> : null}
+                </>
+              ) : null}
             </>
           ) : null}
         </div>

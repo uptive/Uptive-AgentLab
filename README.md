@@ -93,7 +93,11 @@ await window.agentlab.agents.update(id, { name: "New name" }); // partial; undef
 await window.agentlab.agents.delete(id);
 ```
 
-`name`, `role`, `model` and `systemInstructions` are required. `update` and `delete` go to whichever store holds the agent. For tests and mocks, use `createMemoryAgentStore()` from `@agentlab/agent-runtime`, which follows the same contract.
+Agents select an execution engine in the editor. Claude agents require `systemInstructions`; TypeSafe Jev agents require an ordered list of typed Choice, Score, or true/false questions. Mixed flows route each node to its selected engine. Claude agents can also opt into the `typesafe_system_one` function tool to make a structured Jev decision during a run.
+
+Jev is a hosted API, not a locally installed executable. Configure its API key on the **Setup** screen; AgentLab stores it with Electron `safeStorage` and shows whether the API is reachable and which models are available. `TYPESAFE_API_KEY` is supported as an environment fallback. The key is never returned to the renderer.
+
+`name`, `role`, and `model` are required for every agent. `update` and `delete` go to whichever store holds the agent. For tests and mocks, use `createMemoryAgentStore()` from `@agentlab/agent-runtime`, which follows the same contract.
 
 Copy `.env.example` to `.env` in the repo root and fill in `MONGODB_URI` (optionally `MONGODB_DB`, default `agentlab`). `.env` is gitignored — never commit credentials.
 
