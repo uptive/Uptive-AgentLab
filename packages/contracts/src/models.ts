@@ -34,3 +34,10 @@ export function cheapestModelInTier(tier: ModelTier): ModelInfo | undefined {
 export function estimateCostUsd(model: ModelInfo, usage: Pick<Usage, "inputTokens" | "outputTokens">): number {
   return (usage.inputTokens * model.inputUsdPerMTok + usage.outputTokens * model.outputUsdPerMTok) / 1_000_000;
 }
+
+/** TypeSafe Jev list price. Jev bills the evaluated state only; its typed answers are not charged per token. */
+export const JEV_INPUT_USD_PER_MTOK = 0.042;
+
+export function estimateJevCostUsd(usage: Pick<Usage, "inputTokens">): number {
+  return (usage.inputTokens * JEV_INPUT_USD_PER_MTOK) / 1_000_000;
+}

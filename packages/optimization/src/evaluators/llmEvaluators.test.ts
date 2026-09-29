@@ -149,7 +149,9 @@ describe("analyzeRun with model-backed evaluators", () => {
     const failing: ModelClient = { generateJson: () => Promise.reject(new Error("Claude Code is not logged in.")) };
     const result = await analyzeRun(codeReviewFixture, createEvaluators(failing));
 
-    expect(result.skippedEvaluators).toEqual([]);
+    expect(result.skippedEvaluators).toEqual([
+      { evaluatorId: "jev-substitution", category: "model-selection", reason: "TypeSafe Jev is not configured on this computer" },
+    ]);
     expect(result.fallbackEvaluators).toEqual([
       { evaluatorId: "quality", category: "quality", reason: "Claude Code is not logged in." },
       { evaluatorId: "model-selection", category: "model-selection", reason: "Claude Code is not logged in." },
@@ -164,11 +166,17 @@ describe("analyzeRun with model-backed evaluators", () => {
     await analyzeRun(codeReviewFixture, createEvaluators(failing), {
       onProgress: (p) => events.push(`${p.evaluatorId}:${p.status}${p.modelBacked ? "(model)" : ""}`),
     });
-    expect(events.slice(0, 4)).toEqual(["quality:running(model)", "model-selection:running(model)", "token-context:running", "flow-design:running"]);
+    expect(events.slice(0, 5)).toEqual([
+      "quality:running(model)",
+      "model-selection:running(model)",
+      "jev-substitution:running",
+      "jev-substitution:skipped",
+      "token-context:running",
+    ]);
     expect(events).toEqual(
-      expect.arrayContaining(["quality:fallback(model)", "model-selection:fallback(model)", "token-context:done", "flow-design:done"]),
+      expect.arrayContaining(["quality:fallback(model)", "model-selection:fallback(model)", "jev-substitution:skipped", "token-context:done", "flow-design:done"]),
     );
-    expect(events).toHaveLength(8);
+    expect(events).toHaveLength(10);
   });
 
   it("makes one model call per model-backed evaluator", async () => {

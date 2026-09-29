@@ -137,7 +137,7 @@ function JevCard() {
       setBusy(false);
     }
   };
-  const label = status?.state === "ready" ? "Ready" : status?.state === "error" ? "Unavailable" : "Not configured";
+  const label = status?.state === "ready" ? "Ready" : status?.state === "error" ? "Unavailable" : "Optional · not set up";
   const background = status?.state === "ready" ? theme.statusActive : status?.state === "error" ? theme.warning : theme.statusDisabledBg;
   const color = status?.state === "ready" || status?.state === "error" ? theme.onStatus : theme.statusDisabledText;
 
@@ -150,8 +150,14 @@ function JevCard() {
             <span style={{ padding: "2px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, background, color }}>{label}</span>
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 14, color: theme.textSecondary }}>
-            Structured Choice, Score, and Noul decisions. The SDK is built in; AgentLab only needs your TypeSafe API key.
+            Optional second engine for typed decision steps: structured Choice, Score, and Noul answers instead of written text. Flows without
+            Jev agents run exactly as before, whether or not a key is set. The SDK is built in; AgentLab only needs your TypeSafe API key.
           </p>
+          {status?.state === "not-configured" ? (
+            <p style={{ margin: "6px 0 0", fontSize: 13, color: theme.textSecondary }}>
+              Nothing is missing: add a key only when you want to build Jev agents.
+            </p>
+          ) : null}
           {status?.state === "ready" ? <p style={{ margin: "6px 0 0", fontSize: 13 }}>Models: {status.models.join(", ")}</p> : null}
           {status?.state === "error" ? <p style={{ margin: "6px 0 0", fontSize: 13, color: theme.danger }}>{status.error}</p> : null}
         </div>

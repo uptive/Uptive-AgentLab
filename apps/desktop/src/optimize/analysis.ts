@@ -18,6 +18,7 @@ export const modelLabel = (modelId: string) => EVALUATOR_MODELS.find((m) => m.id
 export const EVALUATOR_LABELS: Record<string, string> = {
   quality: "Quality",
   "model-selection": "Model selection",
+  "jev-substitution": "Jev substitution",
   "token-context": "Token & context",
   "flow-design": "Flow design",
 };

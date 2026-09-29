@@ -9,6 +9,7 @@ import type {
   StepTiming,
 } from "@agentlab/contracts";
 import { flowDesignEvaluator } from "./evaluators/flowDesign.js";
+import { jevSubstitutionEvaluator } from "./evaluators/jevSubstitution.js";
 import { createModelSelectionLlmEvaluator } from "./evaluators/modelSelectionLlm.js";
 import { createQualityLlmEvaluator } from "./evaluators/qualityLlm.js";
 import { modelSelectionEvaluator } from "./evaluators/modelSelection.js";
@@ -18,14 +19,26 @@ import { criticalPathMs, scheduleMs, totalRunCostUsd } from "./helpers.js";
 import type { AnalyzeOptions, EvaluationInput, Evaluator, EvaluatorProgress, ModelClient } from "./types.js";
 
 /** Rule-based evaluators; need no model. */
-export const defaultEvaluators: Evaluator[] = [qualityEvaluator, modelSelectionEvaluator, tokenContextEvaluator, flowDesignEvaluator];
+export const defaultEvaluators: Evaluator[] = [
+  qualityEvaluator,
+  modelSelectionEvaluator,
+  jevSubstitutionEvaluator,
+  tokenContextEvaluator,
+  flowDesignEvaluator,
+];
 
 /**
  * Quality and Model Selection judged by a model through `client` (each falls back to its rules if
- * the model is unavailable); Token & Context and Flow Design stay rule-based.
+ * the model is unavailable); Jev Substitution, Token & Context and Flow Design stay rule-based.
  */
 export function createEvaluators(client: ModelClient): Evaluator[] {
-  return [createQualityLlmEvaluator(client), createModelSelectionLlmEvaluator(client), tokenContextEvaluator, flowDesignEvaluator];
+  return [
+    createQualityLlmEvaluator(client),
+    createModelSelectionLlmEvaluator(client),
+    jevSubstitutionEvaluator,
+    tokenContextEvaluator,
+    flowDesignEvaluator,
+  ];
 }
 
 export const CATEGORIES: RecommendationCategory[] = ["quality", "model-selection", "token-context", "flow-design"];
@@ -69,6 +82,12 @@ export async function analyzeRun(
           ...update,
         });
       report({ status: "running" });
+      const skip = evaluator.skipReason?.(input);
+      if (skip) {
+        skippedEvaluators.push({ evaluatorId: evaluator.id, category: evaluator.category, reason: skip });
+        report({ status: "skipped", reason: skip });
+        return [];
+      }
       try {
         const recommendations = await evaluator.evaluate(input);
         report({ status: "done", recommendations: recommendations.length });

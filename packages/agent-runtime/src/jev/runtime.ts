@@ -4,6 +4,7 @@ import { z } from "zod";
 import { readSourceFiles } from "./sources.js";
 import {
   agentEngine,
+  estimateJevCostUsd,
   type AgentDefinition,
   type AgentResult,
   type AgentRunContext,
@@ -14,7 +15,6 @@ import {
   type Usage,
 } from "@agentlab/contracts";
 
-const JEV_INPUT_USD_PER_MTOK = 0.042;
 const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, latencyMs: 0 };
 const JevApiResponseSchema = z.object({
   model: z.string().min(1),
@@ -92,7 +92,7 @@ export function createJevClient(config: JevClientConfig): JevClient {
       const usage: Usage = {
         inputTokens: result.usage.input_tokens,
         outputTokens: result.usage.output_tokens,
-        estimatedCostUsd: (result.usage.input_tokens * JEV_INPUT_USD_PER_MTOK) / 1_000_000,
+        estimatedCostUsd: estimateJevCostUsd({ inputTokens: result.usage.input_tokens }),
         latencyMs: Date.now() - startedAt,
       };
       return { model: result.model, answers: result.answers, usage };

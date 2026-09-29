@@ -1,9 +1,10 @@
-export type { AnalyzeOptions, EvaluationInput, Evaluator, EvaluatorProgress, JsonRequest, JsonResponse, ModelCallUsage, ModelClient } from "./types.js";
+export type { AnalyzeOptions, EvaluationCapabilities, EvaluationInput, Evaluator, EvaluatorProgress, JsonRequest, JsonResponse, ModelCallUsage, ModelClient } from "./types.js";
 export { CATEGORIES, analyzeRun, compareRecommendations, createEvaluators, defaultEvaluators } from "./analyzeRun.js";
 export { qualityEvaluator } from "./evaluators/quality.js";
 export { modelSelectionEvaluator } from "./evaluators/modelSelection.js";
 export { tokenContextEvaluator } from "./evaluators/tokenContext.js";
 export { flowDesignEvaluator } from "./evaluators/flowDesign.js";
+export { jevSubstitutionEvaluator } from "./evaluators/jevSubstitution.js";
 export { createQualityLlmEvaluator } from "./evaluators/qualityLlm.js";
 export { createModelSelectionLlmEvaluator } from "./evaluators/modelSelectionLlm.js";
 export { MODEL_CATALOG, getModel, type ModelInfo, type ModelTier } from "./modelCatalog.js";

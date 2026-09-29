@@ -31,6 +31,7 @@ export type RecommendationTarget =
 
 export type ChangeType =
   | "set-model"
+  | "set-engine"
   | "remove-input"
   | "replace-input"
   | "add-output-schema"

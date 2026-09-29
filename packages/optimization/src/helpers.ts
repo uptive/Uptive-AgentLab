@@ -66,13 +66,29 @@ export function agentName(input: EvaluationInput, agentId: string): string {
 
 const STRUCTURED_TASK_PATTERN = /\b(plan\w*|rout\w*|classif\w*|extract\w*|format\w*|split\w*|list\w*)\b/i;
 
+/** Output size under which a step is small enough to be a typed answer rather than written text. */
+export const LIGHT_OUTPUT_TOKENS = 1_000;
+
+/** A step produced a small output (or recorded none at all counts as unknown, i.e. not light). */
+export function hasLightOutput(step: StepRun, limit = LIGHT_OUTPUT_TOKENS): boolean {
+  return (step.usage?.outputTokens ?? Infinity) < limit;
+}
+
+/** Tools that change the workspace. A step using any of them does real work, not just judgement. */
+const WRITE_TOOLS = /^(write|edit|multiedit|notebookedit|bash)$/i;
+
+/** The step's tool calls that wrote something (files or shell), so judgement-only steps can be found. */
+export function writeToolCalls(step: StepRun): StepRun["toolCalls"] {
+  return step.toolCalls.filter((call) => WRITE_TOOLS.test(call.toolId));
+}
+
 /**
  * A step is "light structured work" when the agent has an output schema, its role reads like
  * planning/routing/extraction, and it produced a small output. Such steps rarely need a strong model.
  */
 export function isLightStructuredStep(agent: AgentDefinition, step: StepRun): boolean {
   const describesStructuredTask = STRUCTURED_TASK_PATTERN.test(`${agent.role} ${agent.name}`);
-  return Boolean(agent.outputSchema) && describesStructuredTask && (step.usage?.outputTokens ?? Infinity) < 1_000;
+  return Boolean(agent.outputSchema) && describesStructuredTask && hasLightOutput(step);
 }
 
 /**

@@ -26,6 +26,17 @@ const lookups = { findAgent: (id: string) => builtinAgents.find((a) => a.id === 
 
 // Absent in a plain browser preview (no Electron preload): then there are only local runs.
 const sharedRuns = (window as { agentlab?: Window["agentlab"] }).agentlab?.sharedRuns;
+const jev = (window as { agentlab?: Window["agentlab"] }).agentlab?.jev;
+
+/** Whether a Jev agent could run here at all. Anything we can't confirm counts as unavailable. */
+async function jevAvailable(): Promise<boolean> {
+  if (!jev) return false;
+  try {
+    return (await jev.status()).state === "ready";
+  } catch {
+    return false;
+  }
+}
 
 function label(flowName: string, runId: string, completedAt: string | undefined, source: RunSummary["source"]): string {
   const when = completedAt ? new Date(completedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : "";
@@ -80,7 +91,7 @@ function createRunSource(): RunSource {
       if (!loaded) throw new Error(`Run ${runId} was not found. Pick another run.`);
       const result = toEvaluationInput(loaded.run, loaded.events, lookups);
       if ("reason" in result) throw new Error(`This run can't be analyzed: ${result.reason}.`);
-      return result.input;
+      return { ...result.input, capabilities: { jevAvailable: await jevAvailable() } };
     },
   };
 }

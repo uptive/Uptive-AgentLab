@@ -57,6 +57,8 @@ export function notTestableReason(input: EvaluationInput, r: Recommendation): st
     case "set-model":
       if (agent?.engine === "jev") return "Claude model changes do not apply to Jev agents";
       return agent ? undefined : "the agent isn't part of this run";
+    case "set-engine":
+      return "switching an agent to Jev needs its typed questions written first";
     case "edit-role":
       return agent ? undefined : "the agent isn't part of this run";
     case "add-output-schema": {
@@ -95,6 +97,7 @@ function editKey(r: Recommendation): string {
   const where = target.kind === "node" ? target.nodeId : target.kind === "agent" ? target.agentId : "flow";
   switch (change.type) {
     case "set-model":
+    case "set-engine":
     case "add-output-schema":
     case "edit-instructions":
     case "edit-role":
