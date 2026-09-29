@@ -7,7 +7,7 @@ import { alpha, theme } from "../theme.js";
 import { SkillPicker, ToolPicker } from "../library/ToolPicker.js";
 import { useLibrary } from "../library/useLibrary.js";
 import { AgentTestPanel } from "./AgentTestPanel.js";
-import { JevQuestionEditor } from "./JevQuestionEditor.js";
+import { JevQuestionEditor, JevSourceEditor } from "./JevQuestionEditor.js";
 
 const MODELS = MODEL_CATALOG.map((m) => m.id);
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -26,6 +26,7 @@ interface FormState {
   maxTurns: string;
   systemInstructions: string;
   questions: JevQuestion[];
+  sources: string[];
   tools: ToolRef[];
   skills: string[];
   inputSchema: string;
@@ -45,6 +46,7 @@ const EMPTY_FORM: FormState = {
   maxTurns: "",
   systemInstructions: "",
   questions: [{ id: "decision", type: "noul", instructions: "Is this statement true?" }],
+  sources: [],
   tools: [],
   skills: [],
   inputSchema: "",
@@ -67,6 +69,7 @@ function toForm(agent: AgentDefinition): FormState {
     maxTurns: agent.modelSettings?.maxTurns?.toString() ?? "",
     systemInstructions: agent.systemInstructions ?? "",
     questions: agent.engine === "jev" ? agent.questions : EMPTY_FORM.questions,
+    sources: agent.engine === "jev" ? agent.sources ?? [] : [],
     tools: agent.tools ?? [],
     skills: agent.skills ?? [],
     inputSchema: stringifySchema(agent.inputSchema),
@@ -99,7 +102,8 @@ function toInput(form: FormState, existing?: AgentDefinition): AgentInput {
     limits: { maxTokens: toNumber(form.limitMaxTokens), maxCostUsd: toNumber(form.limitMaxCostUsd) },
   };
   if (form.engine === "jev") {
-    return { ...common, engine: "jev", questions: form.questions };
+    const sources = form.sources.map((source) => source.trim()).filter((source) => source !== "");
+    return { ...common, engine: "jev", questions: form.questions, sources: sources.length > 0 ? sources : undefined };
   }
   return {
     ...common,
@@ -1022,6 +1026,11 @@ export function AgentsView() {
                   />
                 </Field>
               )}
+              {form.engine === "jev" ? (
+                <Field label="Repository sources">
+                  <JevSourceEditor sources={form.sources} onChange={(sources) => setForm((current) => ({ ...current, sources }))} />
+                </Field>
+              ) : null}
               <Field label="Model *">
                 <select style={{ ...fieldInput, fontFamily: theme.fontMono, fontSize: 13 }} value={form.model} onChange={set("model")} required>
                   {modelOptions.map((model) => (

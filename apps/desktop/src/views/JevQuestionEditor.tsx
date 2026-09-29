@@ -42,6 +42,36 @@ function nextQuestionId(questions: JevQuestion[]): string {
   return `decision_${suffix}`;
 }
 
+export function JevSourceEditor({ sources, onChange }: { sources: string[]; onChange: (sources: string[]) => void }) {
+  const update = (index: number, value: string) => onChange(sources.map((current, currentIndex) => (currentIndex === index ? value : current)));
+
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      {sources.map((source, index) => (
+        <div key={index} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 6 }}>
+          <input
+            aria-label={`Source pattern ${index + 1}`}
+            style={{ ...inputStyle, fontFamily: theme.fontMono }}
+            value={source}
+            placeholder="docs/**/*.md"
+            onChange={(event) => update(index, event.target.value)}
+          />
+          <button type="button" style={smallButton} onClick={() => onChange(sources.filter((_, itemIndex) => itemIndex !== index))}>
+            Remove
+          </button>
+        </div>
+      ))}
+      <button type="button" style={{ ...smallButton, justifySelf: "start" }} onClick={() => onChange([...sources, ""])}>
+        Add source
+      </button>
+      <span style={{ color: theme.textMuted, fontSize: 12 }}>
+        Glob patterns (<code>*</code>, <code>?</code>, <code>**</code>) relative to the run folder. Matched files are read only and passed to Jev as{" "}
+        <code>files</code>; patterns may not be absolute or contain <code>..</code>. A pattern matching nothing is fine.
+      </span>
+    </div>
+  );
+}
+
 export function JevQuestionEditor({ questions, onChange }: Props) {
   const update = (index: number, question: JevQuestion) =>
     onChange(questions.map((current, currentIndex) => (currentIndex === index ? question : current)));

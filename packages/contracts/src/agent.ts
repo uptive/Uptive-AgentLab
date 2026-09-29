@@ -87,6 +87,13 @@ export type JevQuestion = JevNoulQuestion | JevChoiceQuestion | JevScoreQuestion
 export interface JevAgentDefinition extends AgentDefinitionBase {
   engine: "jev";
   questions: JevQuestion[];
+  /**
+   * Glob patterns for repository files whose contents are merged into the evaluated state as
+   * `{ input, files: { "<relative path>": "<contents>" } }`. Read-only: the runtime never writes,
+   * and every pattern is resolved relative to the run folder and may never escape it (absolute
+   * patterns and `..` segments are rejected). A pattern that matches nothing is not an error.
+   */
+  sources?: string[];
   systemInstructions?: never;
   modelSettings?: never;
   tools?: never;

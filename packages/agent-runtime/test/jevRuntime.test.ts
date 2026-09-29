@@ -1,6 +1,10 @@
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentDefinition, TraceEvent } from "@agentlab/contracts";
 import { createJevAgentRuntime, createRoutingAgentRuntime, type JevClient } from "../src/jev/runtime.js";
+import { MAX_SOURCE_FILES, MAX_SOURCE_FILE_BYTES, MAX_SOURCE_TOTAL_BYTES } from "../src/jev/sources.js";
 import { createMemoryAgentStore } from "../src/agentStore.js";
 
 const agent: AgentDefinition = {
@@ -64,18 +68,24 @@ describe("createJevAgentRuntime", () => {
 
   it("reports cancellation when an in-flight request aborts", async () => {
     const controller = new AbortController();
+    let started: () => void;
+    const evaluating = new Promise<void>((resolve) => {
+      started = resolve;
+    });
     const runtime = createJevAgentRuntime({
       signal: controller.signal,
       client: {
         models: client.models,
         evaluate: async (_request, signal) =>
           new Promise((_resolve, reject) => {
+            started();
             signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
           }),
       },
     });
 
     const pending = runtime.run(agent, "ticket", { runId: "run-1", stepRunId: "step-1" });
+    await evaluating;
     controller.abort();
     await expect(pending).resolves.toMatchObject({ status: "failed", error: "Run was cancelled" });
   });
@@ -119,5 +129,156 @@ describe("Jev agent validation", () => {
     });
     expect(switchedBack).toMatchObject({ engine: "claude", systemInstructions: "Route the request.", tools: [] });
     expect(switchedBack).not.toHaveProperty("questions");
+  });
+});
+
+describe("Jev repository sources", () => {
+  async function folderWith(files: Record<string, string | Buffer>): Promise<string> {
+    const folder = await mkdtemp(path.join(tmpdir(), "jev-sources-"));
+    for (const [relative, contents] of Object.entries(files)) {
+      const target = path.join(folder, relative);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, contents);
+    }
+    return folder;
+  }
+
+  function recordingClient(): { client: JevClient; states: unknown[] } {
+    const states: unknown[] = [];
+    return {
+      states,
+      client: {
+        models: client.models,
+        evaluate: async (request) => {
+          states.push(request.state);
+          return client.evaluate(request);
+        },
+      },
+    };
+  }
+
+  const withSources = (sources: string[]): AgentDefinition => ({ ...agent, sources });
+
+  it("resolves globs and injects file contents into the state", async () => {
+    const folder = await folderWith({
+      "docs/engine-rules.md": "# Rules",
+      "docs/nested/deep.md": "deep",
+      ".squad/ownership.yaml": "owner: squad-a",
+      "src/index.ts": "export {};",
+      ".git/config": "[core]",
+    });
+    const { client: recorder, states } = recordingClient();
+    const runtime = createJevAgentRuntime({ client: recorder, folder });
+
+    const result = await runtime.run(withSources(["docs/**/*.md", ".squad/*.yaml"]), { ticket: "T-1" }, { runId: "r", stepRunId: "s" });
+
+    expect(result.status).toBe("completed");
+    expect(states[0]).toEqual({
+      input: { ticket: "T-1" },
+      files: { ".squad/ownership.yaml": "owner: squad-a", "docs/engine-rules.md": "# Rules", "docs/nested/deep.md": "deep" },
+    });
+  });
+
+  it("passes the input through untouched when no sources are configured", async () => {
+    const { client: recorder, states } = recordingClient();
+    const runtime = createJevAgentRuntime({ client: recorder, folder: await folderWith({ "a.md": "a" }) });
+
+    await runtime.run(agent, { ticket: "T-2" }, { runId: "r", stepRunId: "s" });
+
+    expect(states[0]).toEqual({ ticket: "T-2" });
+  });
+
+  it("treats a pattern that matches nothing as no files", async () => {
+    const { client: recorder, states } = recordingClient();
+    const runtime = createJevAgentRuntime({ client: recorder, folder: await folderWith({ "a.md": "a" }) });
+
+    await runtime.run(withSources(["missing/**/*.yaml"]), "ticket", { runId: "r", stepRunId: "s" });
+
+    expect(states[0]).toEqual({ input: "ticket", files: {} });
+  });
+
+  it("rejects patterns that escape the run folder", async () => {
+    const runtime = createJevAgentRuntime({ client, folder: await folderWith({ "a.md": "a" }) });
+
+    await expect(runtime.run(withSources(["../outside/**"]), "t", { runId: "r", stepRunId: "s" })).resolves.toMatchObject({
+      status: "failed",
+      error: 'Jev source pattern "../outside/**" must not contain ".."',
+    });
+    await expect(runtime.run(withSources(["/etc/passwd"]), "t", { runId: "r", stepRunId: "s" })).resolves.toMatchObject({
+      status: "failed",
+      error: 'Jev source pattern "/etc/passwd" must be relative to the run folder',
+    });
+  });
+
+  it("rejects a symlink pointing outside the run folder", async () => {
+    const outside = await folderWith({ "secret.md": "secret" });
+    const folder = await folderWith({ "a.md": "a" });
+    await symlink(path.join(outside, "secret.md"), path.join(folder, "leak.md"));
+    const runtime = createJevAgentRuntime({ client, folder });
+
+    await expect(runtime.run(withSources(["*.md"]), "t", { runId: "r", stepRunId: "s" })).resolves.toMatchObject({
+      status: "failed",
+      error: 'Jev source "leak.md" resolves outside the run folder',
+    });
+  });
+
+  it("fails when a run has no folder", async () => {
+    const runtime = createJevAgentRuntime({ client });
+
+    await expect(runtime.run(withSources(["docs/*.md"]), "t", { runId: "r", stepRunId: "s" })).resolves.toMatchObject({
+      status: "failed",
+      error: 'Agent "triage" defines sources but this run has no folder',
+    });
+  });
+
+  it("skips binary files", async () => {
+    const folder = await folderWith({ "notes.md": "text", "image.bin": Buffer.from([0, 1, 2, 3]) });
+    const { client: recorder, states } = recordingClient();
+    const runtime = createJevAgentRuntime({ client: recorder, folder });
+
+    await runtime.run(withSources(["*"]), "t", { runId: "r", stepRunId: "s" });
+
+    expect(states[0]).toEqual({ input: "t", files: { "notes.md": "text" } });
+  });
+
+  it("fails rather than truncating a file over the per-file cap", async () => {
+    const folder = await folderWith({ "big.md": "x".repeat(MAX_SOURCE_FILE_BYTES + 1) });
+    const runtime = createJevAgentRuntime({ client, folder });
+
+    await expect(runtime.run(withSources(["big.md"]), "t", { runId: "r", stepRunId: "s" })).resolves.toMatchObject({
+      status: "failed",
+      error: `Jev source "big.md" is ${MAX_SOURCE_FILE_BYTES + 1} bytes, over the ${MAX_SOURCE_FILE_BYTES} byte limit for a single file`,
+    });
+  });
+
+  it("fails when the files exceed the total byte cap", async () => {
+    const chunk = "x".repeat(MAX_SOURCE_FILE_BYTES);
+    const count = Math.ceil(MAX_SOURCE_TOTAL_BYTES / MAX_SOURCE_FILE_BYTES) + 1;
+    const files = Object.fromEntries(Array.from({ length: count }, (_, index) => [`part-${index}.md`, chunk]));
+    const runtime = createJevAgentRuntime({ client, folder: await folderWith(files) });
+
+    await expect(runtime.run(withSources(["*.md"]), "t", { runId: "r", stepRunId: "s" })).resolves.toMatchObject({
+      status: "failed",
+      error: `Jev sources exceed the ${MAX_SOURCE_TOTAL_BYTES} byte total limit; narrow the patterns`,
+    });
+  });
+
+  it("fails when the patterns match more files than the cap allows", async () => {
+    const files = Object.fromEntries(Array.from({ length: MAX_SOURCE_FILES + 1 }, (_, index) => [`note-${index}.md`, "x"]));
+    const runtime = createJevAgentRuntime({ client, folder: await folderWith(files) });
+
+    await expect(runtime.run(withSources(["*.md"]), "t", { runId: "r", stepRunId: "s" })).resolves.toMatchObject({
+      status: "failed",
+      error: `Jev sources match more than ${MAX_SOURCE_FILES} files; narrow the patterns`,
+    });
+  });
+
+  it("rejects invalid source patterns when saving an agent", async () => {
+    const store = createMemoryAgentStore();
+    const { id: _id, ...input } = agent;
+
+    await expect(store.create({ ...input, sources: ["docs/**/*.md"] })).resolves.toMatchObject({ sources: ["docs/**/*.md"] });
+    await expect(store.create({ ...input, sources: ["../secrets"] })).rejects.toThrow('must not contain ".."');
+    await expect(store.create({ ...input, sources: [" "] })).rejects.toThrow("Jev source pattern must not be empty");
   });
 });

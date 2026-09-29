@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { TypeSafeClient, type EntryType, type Question, type Questions } from "@typesafe-ai/sdk";
 import { z } from "zod";
+import { readSourceFiles } from "./sources.js";
 import {
   agentEngine,
   type AgentDefinition,
@@ -101,9 +102,18 @@ export function createJevClient(config: JevClientConfig): JevClient {
 
 export interface JevRuntimeConfig {
   client: JevClient;
+  /** Run folder that `sources` globs resolve against; without it an agent with sources fails. */
+  folder?: string;
   signal?: AbortSignal;
   onEvent?: (event: TraceEvent) => void;
   now?: () => Date;
+}
+
+async function buildState(agent: JevAgentDefinition, input: unknown, folder: string | undefined): Promise<unknown> {
+  const patterns = agent.sources ?? [];
+  if (patterns.length === 0) return input;
+  if (!folder) throw new Error(`Agent "${agent.id}" defines sources but this run has no folder`);
+  return { input, files: await readSourceFiles(folder, patterns) };
 }
 
 export function createJevAgentRuntime(config: JevRuntimeConfig): AgentRuntime {
@@ -124,7 +134,9 @@ export function createJevAgentRuntime(config: JevRuntimeConfig): AgentRuntime {
         });
       emit("agent_start", { agentId: agent.id, agentName: agent.name, engine: "jev", model: agent.model, input });
       try {
-        const response = await config.client.evaluate({ state: input, questions: jevAgent.questions, model: agent.model }, config.signal);
+        const state = await buildState(jevAgent, input, config.folder);
+        if (config.signal?.aborted) throw new Error("Run was cancelled");
+        const response = await config.client.evaluate({ state, questions: jevAgent.questions, model: agent.model }, config.signal);
         emit("model_call", {
           provider: "typesafe",
           model: response.model,

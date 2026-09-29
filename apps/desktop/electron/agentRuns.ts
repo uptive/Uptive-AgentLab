@@ -232,7 +232,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
     });
     const runtime = createRoutingAgentRuntime({
       claude: claudeRuntime,
-      jev: createJevAgentRuntime({ client: jevClient ?? unavailableJevClient, signal: controller.signal, onEvent: sendEvent }),
+      jev: createJevAgentRuntime({ client: jevClient ?? unavailableJevClient, folder, signal: controller.signal, onEvent: sendEvent }),
     });
     const engine = createFlowEngine({ runtime, resolveAgent: (id) => agents.get(id), onEvent: sendEvent });
 
@@ -290,8 +290,9 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
   // Test runs from the agent editor: the same runtime as flow runs, but for an unsaved definition,
   // streamed on their own channel and never saved to telemetry.
   const activeTests = new Map<string, AbortController>();
-  ipcMain.handle(IPC.testAgent, async (_e, { testId, agent, input }: AgentTestRequest): Promise<AgentTestResult> => {
+  ipcMain.handle(IPC.testAgent, async (_e, { testId, agent, input, folder }: AgentTestRequest): Promise<AgentTestResult> => {
     validateAgentInput(agent);
+    if (folder && !(await stat(folder).then((s) => s.isDirectory(), () => false))) throw new Error(`Folder not found: ${folder}`);
     const controller = new AbortController();
     activeTests.set(testId, controller);
     const batcher = createStreamBatcher((chunks) => broadcast(IPC.agentTestStream, chunks));
@@ -311,7 +312,7 @@ export function registerAgentRunIpc(deps: AgentRunsDeps): AgentRuns {
     });
     const runtime: AgentRuntime = createRoutingAgentRuntime({
       claude: claudeRuntime,
-      jev: createJevAgentRuntime({ client: jevClient ?? unavailableJevClient, signal: controller.signal }),
+      jev: createJevAgentRuntime({ client: jevClient ?? unavailableJevClient, folder, signal: controller.signal }),
     });
     try {
       const result = await runtime.run(agent, input, { runId: testId, stepRunId: testId });

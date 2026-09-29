@@ -65,6 +65,8 @@ export interface AgentTestRequest {
   testId: string;
   agent: AgentDefinition;
   input: unknown;
+  /** Run folder a Jev agent's `sources` globs resolve against; read-only. */
+  folder?: string;
 }
 
 /** "no-schema" = nothing to check against, "bad-schema" = the schema itself does not compile. */

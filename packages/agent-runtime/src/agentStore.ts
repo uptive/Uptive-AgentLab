@@ -1,4 +1,5 @@
 import type { AgentDefinition, AgentInput, AgentStore, JevQuestion } from "@agentlab/contracts";
+import { validateSourcePattern } from "./jev/sources.js";
 
 const REQUIRED_FIELDS = ["name", "role", "model"] as const;
 const QUESTION_ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
@@ -35,6 +36,15 @@ function validateQuestions(questions: unknown): asserts questions is JevQuestion
   }
 }
 
+function validateSources(sources: unknown): void {
+  if (sources === undefined) return;
+  if (!Array.isArray(sources)) throw new Error('Jev agent field "sources" must be a list of glob patterns');
+  for (const pattern of sources) {
+    if (typeof pattern !== "string" || pattern.trim() === "") throw new Error("Jev source pattern must not be empty");
+    validateSourcePattern(pattern);
+  }
+}
+
 /** Throws if a required field is missing or blank. Pass `partial` for updates. */
 export function validateAgentInput(input: Partial<AgentInput>, partial = false): void {
   const fields = input as Record<string, unknown>;
@@ -47,6 +57,7 @@ export function validateAgentInput(input: Partial<AgentInput>, partial = false):
   const engine = "engine" in input && input.engine === "jev" ? "jev" : "claude";
   if (engine === "jev") {
     if (!partial || "questions" in input) validateQuestions(fields.questions);
+    validateSources(fields.sources);
     if ("tools" in input || "skills" in input || "systemInstructions" in input || "modelSettings" in input) {
       throw new Error("Jev agents cannot define Claude instructions, tools, skills or model settings");
     }
@@ -65,6 +76,7 @@ export function normalizeAgent(agent: AgentDefinition): AgentDefinition {
     return fields as unknown as AgentDefinition;
   }
   delete fields.questions;
+  delete fields.sources;
   return { ...fields, engine: "claude", tools: Array.isArray(fields.tools) ? fields.tools : [] } as unknown as AgentDefinition;
 }
 
